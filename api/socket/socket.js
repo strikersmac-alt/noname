@@ -144,7 +144,6 @@
 // }
 
 // export default initSockets;
-
 import jwt from 'jsonwebtoken';
 import Contest from '../models/contest.model.js';
 import User from '../models/user.model.js';
@@ -152,7 +151,10 @@ import { getContestEntry, normalize, normalizeAnswerArray } from '../controllers
 
 const initSockets = (io) => {
     io.use((socket, next) => {
-        const token = socket.handshake.auth.token;
+        const token = socket.handshake.headers.cookie
+            ?.split('; ')
+            .find(row => row.startsWith('authToken='))
+            ?.split('=')[1];
         
         if (!token) {
             return next(new Error('Authentication error: No token provided'));
