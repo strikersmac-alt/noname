@@ -27,6 +27,7 @@ const corsOptions = {
         'http://localhost:5174',
         'http://localhost:3000',
         'http://localhost:10000',
+        'http://localhost:4173/',
         'https://08a00fe8454c.ngrok-free.app'
     ],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],

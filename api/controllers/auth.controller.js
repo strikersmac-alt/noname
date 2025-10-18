@@ -26,14 +26,16 @@ export const google = async (req, res) => {
     const token = jwt.sign(
       { userId: user._id, email: user.email },
       process.env.JWT_SECRET,
-      { expiresIn: '1d' }
+      { expiresIn: '7d' }
     );
 
     res.cookie('authToken', token, {
-      httpOnly: false,  
-      secure: process.env.NODE_ENV === 'production', 
-      sameSite: 'strict',
-      maxAge: 24 * 60 * 60 * 1000, 
+      // httpOnly: false,  
+      // secure: process.env.NODE_ENV === 'production', 
+      // sameSite: 'strict',
+      // maxAge: 24 * 60 * 60 * 1000, 
+        httpOnly: true,
+        maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
     return res.status(200).json({ success: true, message: 'Authenticated successfully', user, token });
