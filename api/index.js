@@ -22,13 +22,25 @@ firebaseInit();
 initContestExpiryCron(); // Initialize cron job for contest expiry
 
 const corsOptions = {
-    origin: [
-        process.env.CORS_ORIGIN || 'http://localhost:5173',
-        'http://localhost:5174',
-        'http://localhost:3000',
-        'http://localhost:10000',
-        'https://08a00fe8454c.ngrok-free.app'
-    ],
+    origin: function (origin, callback) {
+        const allowedOrigins = [
+            process.env.CORS_ORIGIN || 'http://localhost:5173',
+            'http://localhost:5174',
+            'http://localhost:3000',
+            'http://localhost:10000',
+            'https://08a00fe8454c.ngrok-free.app'
+        ];
+        
+        // Allow requests with no origin (like mobile apps or Postman)
+        if (!origin) return callback(null, true);
+        
+        // Check if the origin is in the allowed list or matches a pattern
+        if (allowedOrigins.indexOf(origin) !== -1 || origin.includes('netlify.app') || origin.includes('vercel.app')) {
+            callback(null, true);
+        } else {
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
     credentials: true,
     allowedHeaders: ['Content-Type', 'Authorization'],
