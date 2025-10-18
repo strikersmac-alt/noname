@@ -30,16 +30,10 @@ export const google = async (req, res) => {
     );
 
     res.cookie('authToken', token, {
-      // httpOnly: false,  
-      // secure: process.env.NODE_ENV === 'production', 
-      // sameSite: 'strict',
-      // maxAge: 24 * 60 * 60 * 1000, 
-        httpOnly: true,
-        maxAge: 7 * 24 * 60 * 60 * 1000,
       httpOnly: false,  
       secure: process.env.NODE_ENV === 'production', 
       sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-      maxAge: 24 * 60 * 60 * 1000, 
+      maxAge: 7 * 24 * 60 * 60 * 1000, 
     });
 
     return res.status(200).json({ success: true, message: 'Authenticated successfully', user, token });
