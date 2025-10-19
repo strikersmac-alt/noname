@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getContestQuestionsById, getContestQuestionsByCode, getContestSummary } from '../controllers/contest.controller.js';
+import { getContestQuestionsById, getContestQuestionsByCode, getContestSummary, getContestStandings } from '../controllers/contest.controller.js';
 import { authMiddleware } from '../middlewares/auth.middleware.js';
 
 const router = Router();
@@ -9,6 +9,9 @@ router.get('/:id/questions', getContestQuestionsById);
 
 // Optional: Fetch questions by contest code
 router.get('/code/:code/questions', getContestQuestionsByCode);
+
+// Get contest standings (no auth required, can be viewed by anyone)
+router.get('/:id/standings', getContestStandings);
 
 // Get contest summary with correct answers and user responses (requires authentication)
 router.get('/:id/summary', authMiddleware, getContestSummary);

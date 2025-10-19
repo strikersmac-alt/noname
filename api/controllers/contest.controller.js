@@ -200,6 +200,57 @@ export const validateContestAnswer = async (req, res) => {
   }
 };
 
+// GET /api/contest/:id/standings
+// Returns the standings for a contest (works for both live and completed contests)
+export const getContestStandings = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid contest id' });
+    }
+
+    const contest = await Contest.findById(id)
+      .select('code mode isLive standing users')
+      .populate('users', 'name profilePicture')
+      .lean();
+
+    if (!contest) {
+      return res.status(404).json({ success: false, message: 'Contest not found' });
+    }
+
+    // Compute standings from the standing array
+    const scores = {};
+    (contest.standing || []).forEach(entry => {
+      const userId = String(entry.user);
+      scores[userId] = (scores[userId] || 0) + (entry.result || 0);
+    });
+
+    // Create standings array with user details
+    const standings = Object.entries(scores)
+      .map(([userId, score]) => {
+        const user = contest.users.find(u => String(u._id) === userId);
+        return { 
+          userId, 
+          name: user?.name || 'Unknown', 
+          score 
+        };
+      })
+      .sort((a, b) => b.score - a.score);
+
+    return res.status(200).json({
+      success: true,
+      standings,
+      isLive: contest.isLive,
+      contestCode: contest.code,
+      mode: contest.mode
+    });
+  } catch (error) {
+    console.error('Error fetching contest standings:', error);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};
+
 // GET /api/contest/:id/summary
 // Returns contest summary with questions, correct answers, and user's responses
 export const getContestSummary = async (req, res) => {
