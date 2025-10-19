@@ -32,7 +32,7 @@
 //                 }
 //                 socket.join(contestId);
 //                 callback({ success: true, message: 'Joined contest room' });
-                
+
 //                 // Optionally send current standings on join
 //                 const standings = await computeStandings(contestId);
 //                 socket.emit('updateStandings', standings);
@@ -148,14 +148,16 @@ import jwt from 'jsonwebtoken';
 import Contest from '../models/contest.model.js';
 import User from '../models/user.model.js';
 import { getContestEntry, normalize, normalizeAnswerArray } from '../controllers/contest.controller.js';
-
+import {Mutex} from 'async-mutex';
+import mongoose from 'mongoose';
+const contestMutexes = new Map();
 const initSockets = (io) => {
     io.use((socket, next) => {
         const token = socket.handshake.headers.cookie
             ?.split('; ')
             .find(row => row.startsWith('authToken='))
             ?.split('=')[1];
-        
+
         if (!token) {
             return next(new Error('Authentication error: No token provided'));
         }
@@ -164,79 +166,125 @@ const initSockets = (io) => {
                 console.error('JWT verification failed:', err.message);
                 return next(new Error('Authentication error: Invalid token'));
             }
-            
+
             // Set user with _id from the decoded token
             socket.user = {
                 _id: decoded.userId,  // The JWT contains userId, not _id
                 email: decoded.email
             };
-            
+
             next();
         });
     });
 
     io.on('connection', (socket) => {
         socket.on('joinContest', async (contestId, callback) => {
+            // Validate contestId format
+            if (!mongoose.Types.ObjectId.isValid(contestId)) {
+                console.warn(`Invalid contest ID: ${contestId}`);
+                return callback({ success: false, message: 'Invalid contest ID' });
+            }
+
+            // Get or create mutex for this contest
+            let mutex = contestMutexes.get(contestId);
+            if (!mutex) {
+                mutex = new Mutex();
+                contestMutexes.set(contestId, mutex);
+            }
+
+            const release = await mutex.acquire();
             try {
-                // First check if contest exists and get basic info
-                const contest = await Contest.findById(contestId);
+                // console.log(`Lock acquired for contest ${contestId} by user ${socket.user._id}`);
+
+                // Fetch contest with populated users
+                const contest = await Contest.findById(contestId).populate('users', 'name profilePicture email');
                 if (!contest) {
+                    console.warn(`Contest not found: ${contestId}`);
                     return callback({ success: false, message: 'Contest not found' });
                 }
 
-                // Check if contest is already running
+                // Validate capacity
+                if (contest.capacity !== null && contest.capacity <= 0) {
+                    console.warn(`Invalid capacity for contest ${contestId}: ${contest.capacity}`);
+                    return callback({ success: false, message: 'Invalid contest capacity' });
+                }
+
+                // Check if contest is live
                 if (contest.isLive) {
-                    // Check if user is already enrolled (can view standings)
                     const isUserInContest = contest.users.some(u => u._id.toString() === socket.user._id);
                     if (isUserInContest) {
-                        // Allow enrolled users to join socket room for standings
                         socket.join(contestId);
+                        console.log(`User ${socket.user._id} joined live contest ${contestId} room`);
                         return callback({ success: true, message: 'Joined contest room' });
-                    } else {
-                        // Don't allow new users to join running contest
-                        return callback({ success: false, message: 'Contest is already running. You cannot join now.' });
                     }
+                    return callback({ success: false, message: 'Contest is already running. You cannot join now.' });
                 }
 
-                // Check if user is already in the contest
+                // Check if user is already in contest
                 const isUserInContest = contest.users.some(u => u._id.toString() === socket.user._id);
-                
-                // Only add user if contest is not live and user not already in contest
-                if (!isUserInContest) {
-                    // Use atomic operation to add user with capacity check
-                    // This prevents race conditions when multiple users join simultaneously
-                    const updateQuery = {
-                        _id: contestId,
-                        isLive: false,
-                        users: { $ne: socket.user._id }, // Ensure user not already in array
-                    };
-                    
-                    // Add capacity condition if defined
-                    if (contest.capacity) {
-                        updateQuery[`users.${contest.capacity - 1}`] = { $exists: false }; // Array length < capacity
-                    }
-
-                    const updatedContest = await Contest.findOneAndUpdate(
-                        updateQuery,
-                        { $push: { users: socket.user._id } },
-                        { new: false } // Return old document to check if update happened
-                    );
-
-                    if (!updatedContest) {
-                        // Update failed - either capacity reached or contest started
-                        if (contest.capacity && contest.users.length >= contest.capacity) {
-                            return callback({ success: false, message: 'Contest has reached maximum capacity' });
-                        }
-                        return callback({ success: false, message: 'Unable to join contest. It may have started or is full.' });
-                    }
-
-                    // Update the user document to include the contest
-                    await User.findByIdAndUpdate(socket.user._id, {
-                        $addToSet: { contests: contestId },
-                    });
+                if (isUserInContest) {
+                    socket.join(contestId);
+                    console.log(`User ${socket.user._id} already in contest ${contestId}, joined room`);
+                    return callback({ success: true, message: 'Already in contest, joined room' });
                 }
 
-                // Join the Socket.IO room (allow joining even if contest ended for standings view)
+                // Double-check capacity before attempting update
+                if (contest.capacity && contest.users.length >= contest.capacity) {
+                    console.warn(`Capacity exceeded for contest ${contestId}: ${contest.users.length}/${contest.capacity}`);
+                    return callback({ success: false, message: 'Contest has reached maximum capacity' });
+                }
+
+                // Atomic update with strict capacity check
+                const updateQuery = {
+                    _id: contestId,
+                    isLive: false,
+                    users: { $ne: socket.user._id },
+                };
+                if (contest.capacity) {
+                    updateQuery[`users.${contest.capacity}`] = { $exists: false };
+                }
+
+                const updatedContest = await Contest.findOneAndUpdate(
+                    updateQuery,
+                    { $push: { users: socket.user._id } },
+                    { new: true, populate: { path: 'users', select: 'name profilePicture email' } }
+                );
+
+                if (!updatedContest) {
+                    // Re-fetch contest to determine why update failed
+                    const freshContest = await Contest.findById(contestId);
+                    if (!freshContest) {
+                        console.error(`Contest ${contestId} no longer exists`);
+                        return callback({ success: false, message: 'Contest no longer exists' });
+                    }
+                    if (freshContest.isLive) {
+                        console.warn(`Contest ${contestId} started during join attempt`);
+                        return callback({ success: false, message: 'Contest has started' });
+                    }
+                    if (freshContest.capacity && freshContest.users.length >= freshContest.capacity) {
+                        console.warn(`Capacity exceeded for contest ${contestId}: ${freshContest.users.length}/${freshContest.capacity}`);
+                        return callback({ success: false, message: 'Contest has reached maximum capacity' });
+                    }
+                    console.error(`Unknown failure joining contest ${contestId} for user ${socket.user._id}`);
+                    return callback({ success: false, message: 'Unable to join contest due to an unexpected error' });
+                }
+
+                // Double-check capacity after update
+                if (updatedContest.capacity && updatedContest.users.length > updatedContest.capacity) {
+                    console.error(`Over-capacity detected for contest ${contestId}: ${updatedContest.users.length}/${updatedContest.capacity}`);
+                    await Contest.findByIdAndUpdate(contestId, {
+                        $pull: { users: socket.user._id },
+                    });
+                    return callback({ success: false, message: 'Contest has reached maximum capacity' });
+                }
+
+                // Update user document
+                await User.findByIdAndUpdate(socket.user._id, {
+                    $addToSet: { contests: contestId },
+                });
+                console.log(`User ${socket.user._id} added to contest ${contestId}`);
+
+                // Join Socket.IO room
                 socket.join(contestId);
                 callback({ success: true, message: 'Joined contest room' });
 
@@ -244,17 +292,23 @@ const initSockets = (io) => {
                 const standings = await computeStandings(contestId);
                 socket.emit('updateStandings', standings);
 
-                // Fetch fresh contest data with populated users
-                const updatedContestData = await Contest.findById(contestId).populate('users', 'name profilePicture email');
-                
-                io.to(contestId).emit('updateParticipants', updatedContestData.users.map(u => ({
+                // Emit updated participants
+                io.to(contestId).emit('updateParticipants', updatedContest.users.map(u => ({
                     userId: u._id,
                     name: u.name,
                     profilePicture: u.profilePicture,
                 })));
             } catch (error) {
-                console.error('Error in joinContest:', error);
-                callback({ success: false, message: 'Error joining contest' });
+                console.error(`Error in joinContest for contest ${contestId}:`, error);
+                callback({ success: false, message: `Error joining contest: ${error.message}` });
+            } finally {
+                // Release the lock
+                release();
+                console.log(`Lock released for contest ${contestId}`);
+                // Clean up mutex if no longer needed (optional, to manage memory)
+                if (!mutex.isLocked()) {
+                    contestMutexes.delete(contestId);
+                }
             }
         });
 
@@ -351,7 +405,7 @@ const initSockets = (io) => {
                 const totalQuestions = contest.questions.length;
                 const totalParticipants = contest.users.length;
                 const completedParticipants = new Set();
-                
+
                 contest.standing.forEach(s => {
                     const userId = s.user.toString();
                     if (!completedParticipants.has(userId)) {
