@@ -213,20 +213,21 @@ const initSockets = (io) => {
                             users: { $ne: socket.user._id }, // Ensure user not already in array
                         };
 
-                        // Add capacity condition if defined
-                        if (contest.capacity) {
-                            updateQuery[`users.${contest.capacity - 1}`] = { $exists: false }; // Array length < capacity
+                        const capacity = contest.mode === 'duel' ? 2 : contest.mode === 'multiplayer' ? 8 : contest.capacity;
+
+                        if (capacity) {
+                            updateQuery[`users.${capacity - 1}`] = { $exists: false }; 
                         }
 
                         const updatedContest = await Contest.findOneAndUpdate(
                             updateQuery,
                             { $push: { users: socket.user._id } },
-                            { new: false, session } 
+                            { new: false, session }
                         );
 
                         if (!updatedContest) {
                             // Update failed - either capacity reached or contest started
-                            if (contest.capacity && contest.users.length >= contest.capacity) {
+                            if (capacity && contest.users.length >= capacity) {
                                 return callback({ success: false, message: 'Contest has reached maximum capacity' });
                             }
                             return callback({ success: false, message: 'Unable to join contest. It may have started or is full.' });
