@@ -148,7 +148,7 @@ import jwt from 'jsonwebtoken';
 import Contest from '../models/contest.model.js';
 import User from '../models/user.model.js';
 import { getContestEntry, normalize, normalizeAnswerArray } from '../controllers/contest.controller.js';
-
+import mongoose from 'mongoose';
 const initSockets = (io) => {
     io.use((socket, next) => {
         const token = socket.handshake.headers.cookie
