@@ -22,6 +22,7 @@ export const initContestExpiryCron = () => {
                 // Check if contest time has expired
                 if (now >= endTime) {
                     contest.isLive = false;
+                    contest.status = "end";
                     await contest.save();
                     console.log(`✅ Contest ${contest.code} (${contest._id}) marked as not live - time expired`);
                 }

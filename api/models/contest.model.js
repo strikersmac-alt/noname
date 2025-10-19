@@ -86,6 +86,11 @@ const contestSchema = new mongoose.Schema(
     },
     capacity: {
       type: Number,
+    },
+    status: {
+      type: String,
+      enum: ['waiting', 'live', 'end'],
+      default: 'waiting'
     }
   },
   { timestamps: true } 
