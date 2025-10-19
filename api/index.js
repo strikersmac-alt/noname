@@ -30,6 +30,9 @@ const corsOptions = {
             'http://localhost:10000',
             'http://localhost:4173',
             'http://localhost:5173',
+            'http://192.168.56.1:5173',
+            'http://192.168.1.77:5173',
+            'http://172.21.48.1:5173',
             'https://08a00fe8454c.ngrok-free.app'
         ];
         
