@@ -36,7 +36,7 @@ export const google = async (req, res) => {
       maxAge: 7 * 24 * 60 * 60 * 1000, 
     });
 
-    return res.status(200).json({ success: true, message: 'Authenticated successfully', user, token });
+    return res.status(200).json({ success: true, message: 'Authenticated successfully', user });
   } catch (error) {
     console.error('Auth error:', error);
     return res.status(401).json({ success: false, message: 'Invalid token' });
@@ -44,7 +44,12 @@ export const google = async (req, res) => {
 };
 
 export const logout = (req, res) => {
-  res.clearCookie('authToken');
+  res.clearCookie('authToken', {
+    httpOnly: false,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+    path: '/'
+  });
   return res.status(200).json({ success: true, message: 'Logged out' });
 };
 
