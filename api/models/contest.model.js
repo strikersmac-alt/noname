@@ -96,5 +96,8 @@ const contestSchema = new mongoose.Schema(
   { timestamps: true } 
 );
 
+// Add index for better query performance when sorting by createdAt
+contestSchema.index({ createdAt: -1 });
+
 const Contest = mongoose.model("Contest", contestSchema);
 export default Contest;
