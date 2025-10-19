@@ -32,7 +32,7 @@
 //                 }
 //                 socket.join(contestId);
 //                 callback({ success: true, message: 'Joined contest room' });
-                
+
 //                 // Optionally send current standings on join
 //                 const standings = await computeStandings(contestId);
 //                 socket.emit('updateStandings', standings);
@@ -155,7 +155,7 @@ const initSockets = (io) => {
             ?.split('; ')
             .find(row => row.startsWith('authToken='))
             ?.split('=')[1];
-        
+
         if (!token) {
             return next(new Error('Authentication error: No token provided'));
         }
@@ -164,97 +164,105 @@ const initSockets = (io) => {
                 console.error('JWT verification failed:', err.message);
                 return next(new Error('Authentication error: Invalid token'));
             }
-            
+
             // Set user with _id from the decoded token
             socket.user = {
                 _id: decoded.userId,  // The JWT contains userId, not _id
                 email: decoded.email
             };
-            
+
             next();
         });
     });
 
     io.on('connection', (socket) => {
         socket.on('joinContest', async (contestId, callback) => {
+            const session = await mongoose.startSession();
+
             try {
-                // First check if contest exists and get basic info
-                const contest = await Contest.findById(contestId);
-                if (!contest || contest.status == "end") {
-                    return callback({ success: false, message: 'Contest not found' });
-                }
-
-                // Check if contest is already running
-                if (contest.isLive) {
-                    // Check if user is already enrolled (can view standings)
-                    const isUserInContest = contest.users.some(u => u._id.toString() === socket.user._id);
-                    if (isUserInContest) {
-                        // Allow enrolled users to join socket room for standings
-                        socket.join(contestId);
-                        return callback({ success: true, message: 'Joined contest room' });
-                    } else {
-                        // Don't allow new users to join running contest
-                        return callback({ success: false, message: 'Contest is already running. You cannot join now.' });
-                    }
-                }
-
-                // Check if user is already in the contest
-                const isUserInContest = contest.users.some(u => u._id.toString() === socket.user._id);
-                
-                // Only add user if contest is not live and user not already in contest
-                if (!isUserInContest) {
-                    // Use atomic operation to add user with capacity check
-                    // This prevents race conditions when multiple users join simultaneously
-                    const updateQuery = {
-                        _id: contestId,
-                        isLive: false,
-                        users: { $ne: socket.user._id }, // Ensure user not already in array
-                    };
-                    
-                    // Add capacity condition if defined
-                    if (contest.capacity) {
-                        updateQuery[`users.${contest.capacity - 1}`] = { $exists: false }; // Array length < capacity
+                await session.withTransaction(async () => {
+                    // First check if contest exists and get basic info
+                    const contest = await Contest.findById(contestId).session(session);
+                    if (!contest || contest.status === "end") {
+                        return callback({ success: false, message: 'Contest not found' });
                     }
 
-                    const updatedContest = await Contest.findOneAndUpdate(
-                        updateQuery,
-                        { $push: { users: socket.user._id } },
-                        { new: false } // Return old document to check if update happened
-                    );
-
-                    if (!updatedContest) {
-                        // Update failed - either capacity reached or contest started
-                        if (contest.capacity && contest.users.length >= contest.capacity) {
-                            return callback({ success: false, message: 'Contest has reached maximum capacity' });
+                    // Check if contest is already running
+                    if (contest.isLive) {
+                        // Check if user is already enrolled (can view standings)
+                        const isUserInContest = contest.users.some(u => u._id.toString() === socket.user._id);
+                        if (isUserInContest) {
+                            // Allow enrolled users to join socket room for standings
+                            socket.join(contestId);
+                            return callback({ success: true, message: 'Joined contest room' });
+                        } else {
+                            // Don't allow new users to join running contest
+                            return callback({ success: false, message: 'Contest is already running. You cannot join now.' });
                         }
-                        return callback({ success: false, message: 'Unable to join contest. It may have started or is full.' });
                     }
 
-                    // Update the user document to include the contest
-                    await User.findByIdAndUpdate(socket.user._id, {
-                        $addToSet: { contests: contestId },
-                    });
-                }
+                    // Check if user is already in the contest
+                    const isUserInContest = contest.users.some(u => u._id.toString() === socket.user._id);
 
-                // Join the Socket.IO room (allow joining even if contest ended for standings view)
-                socket.join(contestId);
-                callback({ success: true, message: 'Joined contest room' });
+                    // Only add user if contest is not live and user not already in contest
+                    if (!isUserInContest) {
+                        // Use atomic operation to add user with capacity check
+                        const updateQuery = {
+                            _id: contestId,
+                            isLive: false,
+                            users: { $ne: socket.user._id }, // Ensure user not already in array
+                        };
 
-                // Send updated standings
-                const standings = await computeStandings(contestId);
-                socket.emit('updateStandings', standings);
+                        // Add capacity condition if defined
+                        if (contest.capacity) {
+                            updateQuery[`users.${contest.capacity - 1}`] = { $exists: false }; // Array length < capacity
+                        }
 
-                // Fetch fresh contest data with populated users
-                const updatedContestData = await Contest.findById(contestId).populate('users', 'name profilePicture email');
-                
-                io.to(contestId).emit('updateParticipants', updatedContestData.users.map(u => ({
-                    userId: u._id,
-                    name: u.name,
-                    profilePicture: u.profilePicture,
-                })));
+                        const updatedContest = await Contest.findOneAndUpdate(
+                            updateQuery,
+                            { $push: { users: socket.user._id } },
+                            { new: false, session } 
+                        );
+
+                        if (!updatedContest) {
+                            // Update failed - either capacity reached or contest started
+                            if (contest.capacity && contest.users.length >= contest.capacity) {
+                                return callback({ success: false, message: 'Contest has reached maximum capacity' });
+                            }
+                            return callback({ success: false, message: 'Unable to join contest. It may have started or is full.' });
+                        }
+
+                        // Update the user document to include the contest
+                        await User.findByIdAndUpdate(
+                            socket.user._id,
+                            { $addToSet: { contests: contestId } },
+                            { session }
+                        );
+                    }
+
+                    socket.join(contestId);
+                    callback({ success: true, message: 'Joined contest room' });
+
+                    // Send updated standings
+                    const standings = await computeStandings(contestId);
+                    socket.emit('updateStandings', standings);
+
+                    // Fetch fresh contest data with populated users
+                    const updatedContestData = await Contest.findById(contestId)
+                        .populate('users', 'name profilePicture email')
+                        .session(session);
+
+                    io.to(contestId).emit('updateParticipants', updatedContestData.users.map(u => ({
+                        userId: u._id,
+                        name: u.name,
+                        profilePicture: u.profilePicture,
+                    })));
+                });
             } catch (error) {
                 console.error('Error in joinContest:', error);
                 callback({ success: false, message: 'Error joining contest' });
+            } finally {
+                session.endSession();
             }
         });
 
@@ -353,7 +361,7 @@ const initSockets = (io) => {
                 const totalQuestions = contest.questions.length;
                 const totalParticipants = contest.users.length;
                 const completedParticipants = new Set();
-                
+
                 contest.standing.forEach(s => {
                     const userId = s.user.toString();
                     if (!completedParticipants.has(userId)) {
