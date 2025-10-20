@@ -14,13 +14,16 @@ import nptelRouter from './routes/nptel.route.js';
 import profileRoutes from './routes/profile.route.js';
 import courseRoutes from './routes/courses.router.js';
 import initSockets from './socket/socket.js';
-import initContestExpiryCron from './cron/contestExpiry.js';
 import analyticsRoutes from './routes/analytics.route.js';
+
+import dailyActiveUserJob from './cron/dau.js';
+import initContestExpiryCron from './cron/contestExpiry.js';
 
 dotenv.config();
 connectDB();
 firebaseInit();
 initContestExpiryCron(); // Initialize cron job for contest expiry
+dailyActiveUserJob.start();
 
 const corsOptions = {
     origin: function (origin, callback) {

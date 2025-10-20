@@ -99,6 +99,25 @@ const nptelPracticeAnalyticsSchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
+const DailyActiveUserSchema = new mongoose.Schema({
+  date: {
+    type: Date,
+    required: true,
+    unique: true,
+  },
+  totalActiveUsers: {
+    type: Number,
+    required: true,
+    default: 0,
+  },
+  users: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+  ],
+});
+
 const userSchema = new mongoose.Schema(
   {
     name: {
@@ -139,6 +158,7 @@ const userSchema = new mongoose.Schema(
 const User = mongoose.model("User", userSchema);
 const UserAnalytics = mongoose.model("UserAnalytics", userAnalyticsSchema);
 const ContestAnalytics = mongoose.model("ContestAnalytics", contestAnalyticsSchema);
+const DailyActiveUsers = mongoose.model("DailyActiveUsers", DailyActiveUserSchema);
 
 const DailyUserAnalytics = mongoose.model("DailyUserAnalytics", dailyUserAnalyticsSchema);
 const NptelPracticeAnalytics = mongoose.model("NptelPracticeAnalytics", nptelPracticeAnalyticsSchema);
@@ -148,4 +168,4 @@ nptelPracticeAnalyticsSchema.index({ subject: 1, date: 1 }, { unique: true });
 
 
 export default User;
-export { UserAnalytics, ContestAnalytics, DailyUserAnalytics, NptelPracticeAnalytics};
+export { UserAnalytics, ContestAnalytics, DailyUserAnalytics, NptelPracticeAnalytics, DailyActiveUsers};
