@@ -15,6 +15,7 @@ import profileRoutes from './routes/profile.route.js';
 import courseRoutes from './routes/courses.router.js';
 import initSockets from './socket/socket.js';
 import initContestExpiryCron from './cron/contestExpiry.js';
+import analyticsRoutes from './routes/analytics.route.js';
 
 dotenv.config();
 connectDB();
@@ -69,6 +70,7 @@ app.use('/api/contest', contestRoutes);
 app.use('/api/nptel', nptelRouter);
 app.use('/api/profile', profileRoutes);
 app.use('/api/course', courseRoutes);
+app.use('/api/analytics', analyticsRoutes);
 
 app.use((err, req, res, next) => {
     console.error('Server error:', err);

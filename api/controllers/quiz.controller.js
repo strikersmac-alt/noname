@@ -181,7 +181,7 @@ const createContest = async (topic, difficulty, numQuestions, contestDetails) =>
         });
 
         const savedContest = await newContest.save();
-        console.log("saved contest")
+        // console.log("saved contest")
         return savedContest;
     } catch (error) {
         throw new Error(`Failed to create contest: ${error.message}`);

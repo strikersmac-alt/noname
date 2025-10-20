@@ -81,7 +81,7 @@ export const getContestQuestionsById = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid contest id' });
     }
 
-    const contest = await Contest.findById(id).select('code mode isLive duration startTime timeZone admin questions._id questions.statement questions.options questions.topic questions.correctAnswer questions.week');
+    const contest = await Contest.findById(id).select('code mode contestType isLive duration startTime timeZone admin questions._id questions.statement questions.options questions.topic questions.correctAnswer questions.week');
 
     if (!contest) {
       return res.status(404).json({ success: false, message: 'Contest not found' });
@@ -100,6 +100,7 @@ export const getContestQuestionsById = async (req, res) => {
       meta: {
         code: contest.code,
         mode: contest.mode,
+        contestType: contest.contestType,
         isLive: contest.isLive,
         duration: contest.duration,
         startTime: contest.startTime,
@@ -124,7 +125,7 @@ export const getContestQuestionsByCode = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Contest code is required' });
     }
 
-    const contest = await Contest.findOne({ code }).select('code mode isLive duration startTime timeZone admin questions._id questions.statement questions.options questions.topic questions.correctAnswer questions.week');
+    const contest = await Contest.findOne({ code }).select('code mode contestType isLive duration startTime timeZone admin questions._id questions.statement questions.options questions.topic questions.correctAnswer questions.week');
 
     if (!contest) {
       return res.status(404).json({ success: false, message: 'Contest not found' });
@@ -143,6 +144,7 @@ export const getContestQuestionsByCode = async (req, res) => {
       meta: {
         code: contest.code,
         mode: contest.mode,
+        contestType: contest.contestType,
         isLive: contest.isLive,
         duration: contest.duration,
         startTime: contest.startTime,
@@ -259,7 +261,7 @@ export const getContestSummary = async (req, res) => {
     // JWT payload contains userId field, not _id
     const userId = req.user?.userId || req.user?._id;
 
-    console.log('Contest summary request - User:', req.user, 'UserId:', userId);
+    // console.log('Contest summary request - User:', req.user, 'UserId:', userId);
 
     if (!userId) {
       return res.status(401).json({ success: false, message: 'Unauthorized' });
@@ -277,14 +279,14 @@ export const getContestSummary = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Contest not found' });
     }
 
-    console.log('Contest found:', id, 'Users:', contest.users.length, 'Standing entries:', contest.standing.length);
+    // console.log('Contest found:', id, 'Users:', contest.users.length, 'Standing entries:', contest.standing.length);
 
     // Check if user participated in the contest
     const isParticipant = contest.users.some(u => String(u) === String(userId)) || 
                          String(contest.admin) === String(userId);
 
     if (!isParticipant) {
-      console.log('User not participant. UserId:', userId, 'Contest users:', contest.users.map(u => String(u)));
+      // console.log('User not participant. UserId:', userId, 'Contest users:', contest.users.map(u => String(u)));
       return res.status(403).json({ success: false, message: 'You did not participate in this contest' });
     }
 
@@ -297,7 +299,7 @@ export const getContestSummary = async (req, res) => {
         answer: s.answer || [] // Store the actual answer if available
       }));
 
-    console.log('User answers found:', userAnswers.length);
+    // console.log('User answers found:', userAnswers.length);
 
     // Return questions with correct answers
     const questions = contest.questions.map(q => ({
