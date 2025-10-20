@@ -8,7 +8,7 @@ export const getUserProfile = async (req, res) => {
     // Get pagination parameters
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
-    
+
     // Validate pagination parameters
     const validatedPage = Math.max(1, page);
     const validatedLimit = Math.min(Math.max(1, limit), 50); // Max 50 items per page
@@ -26,20 +26,20 @@ export const getUserProfile = async (req, res) => {
     const totalContests = user.contests.length;
     const totalPages = Math.ceil(totalContests / validatedLimit);
 
+    const reversedContests = [...user.contests].reverse();
+
     // Get paginated contest IDs
-    const paginatedContestIds = user.contests
-      .slice(skip, skip + validatedLimit);
+    const paginatedContestIds = reversedContests.slice(skip, skip + validatedLimit);
 
     // Fetch paginated contests with full data
     const contests = await Contest.find({
       _id: { $in: paginatedContestIds }
     })
       .select('code mode isLive duration startTime createdAt standing questions')
-      .sort({ createdAt: -1 })
       .lean();
 
-    // For insights calculation, we need all contests data
-    // But we'll do it more efficiently
+    contests.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
     const allContestsForInsights = await Contest.find({
       _id: { $in: user.contests }
     })
@@ -51,7 +51,6 @@ export const getUserProfile = async (req, res) => {
 
     // Format paginated contest history
     const contestHistory = contests.map(contest => {
-      // Calculate user's score in this contest
       const userResults = contest.standing.filter(
         s => s.user.toString() === userId
       );
@@ -62,8 +61,7 @@ export const getUserProfile = async (req, res) => {
       const scores = {};
       contest.standing.forEach(s => {
         const uid = s.user.toString();
-        if (!scores[uid]) scores[uid] = 0;
-        scores[uid] += s.result;
+        scores[uid] = (scores[uid] || 0) + s.result;
       });
       const sortedScores = Object.entries(scores)
         .map(([uid, score]) => ({ uid, score }))
@@ -81,10 +79,9 @@ export const getUserProfile = async (req, res) => {
         userScore,
         totalQuestions,
         rank,
-        totalParticipants: Object.keys(scores).length
+        totalParticipants: sortedScores.length
       };
     });
-
     return res.status(200).json({
       success: true,
       profile: {
