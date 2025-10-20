@@ -5,24 +5,52 @@ export const getUserProfile = async (req, res) => {
   try {
     const userId = req.user.userId; // From auth middleware
 
-    // Fetch user with populated contests
+    // Get pagination parameters
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    
+    // Validate pagination parameters
+    const validatedPage = Math.max(1, page);
+    const validatedLimit = Math.min(Math.max(1, limit), 50); // Max 50 items per page
+    const skip = (validatedPage - 1) * validatedLimit;
+
+    // Fetch user basic info
     const user = await User.findById(userId)
-      .select('name email profilePicture contests createdAt')
-      .populate({
-        path: 'contests',
-        select: 'code mode isLive duration startTime createdAt standing questions',
-        options: { sort: { createdAt: -1 } } // Most recent first
-      });
+      .select('name email profilePicture contests createdAt');
 
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
-    // Calculate insights from contest history
-    const insights = calculateUserInsights(user, userId);
+    // Get total contest count
+    const totalContests = user.contests.length;
+    const totalPages = Math.ceil(totalContests / validatedLimit);
 
-    // Format contest history
-    const contestHistory = user.contests.map(contest => {
+    // Get paginated contest IDs
+    const paginatedContestIds = user.contests
+      .slice(skip, skip + validatedLimit);
+
+    // Fetch paginated contests with full data
+    const contests = await Contest.find({
+      _id: { $in: paginatedContestIds }
+    })
+      .select('code mode isLive duration startTime createdAt standing questions')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    // For insights calculation, we need all contests data
+    // But we'll do it more efficiently
+    const allContestsForInsights = await Contest.find({
+      _id: { $in: user.contests }
+    })
+      .select('mode standing questions createdAt')
+      .lean();
+
+    // Calculate insights from all contest history
+    const insights = calculateUserInsights(allContestsForInsights, userId);
+
+    // Format paginated contest history
+    const contestHistory = contests.map(contest => {
       // Calculate user's score in this contest
       const userResults = contest.standing.filter(
         s => s.user.toString() === userId
@@ -66,7 +94,14 @@ export const getUserProfile = async (req, res) => {
         memberSince: user.createdAt
       },
       contestHistory,
-      insights
+      insights,
+      pagination: {
+        currentPage: validatedPage,
+        totalPages: totalPages || 1,
+        totalContests,
+        hasNextPage: validatedPage < totalPages,
+        hasPrevPage: validatedPage > 1
+      }
     });
   } catch (error) {
     console.error('Error fetching user profile:', error);
@@ -75,8 +110,7 @@ export const getUserProfile = async (req, res) => {
 };
 
 // Helper function to calculate user insights
-function calculateUserInsights(user, userId) {
-  const contests = user.contests;
+function calculateUserInsights(contests, userId) {
   
   if (contests.length === 0) {
     return {
