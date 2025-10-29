@@ -2,6 +2,7 @@ import axios from 'axios';
 import Contest from '../models/contest.model.js'
 import User from '../models/user.model.js'
 import Nptel from '../models/nptel.model.js'
+import Question from '../models/question.model.js'
 import mongoose from 'mongoose';
 
 const generateUniqueCode = async () => {
@@ -31,8 +32,34 @@ const getGeminiApiKeys = () => {
         .filter(Boolean);
 };
 
+// Helper function to extract keywords from topic
+const extractKeywords = (topic) => {
+    const stopWords = ['and', 'or', 'the', 'in', 'on', 'at', 'to', 'a', 'an', 'of', 'for', 'with', 'is', 'are'];
+    return topic
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ') // Remove special chars
+        .split(/\s+/)
+        .filter(word => word.length > 2 && !stopWords.includes(word));
+};
 
-const generateQuestions = async (topic, difficulty, numQuestions) => {
+// Calculate similarity score between two keyword arrays using Jaccard similarity
+const calculateTopicSimilarity = (keywords1, keywords2) => {
+    if (!keywords1.length || !keywords2.length) return 0;
+    
+    const set1 = new Set(keywords1);
+    const set2 = new Set(keywords2);
+    
+    // Intersection
+    const intersection = [...set1].filter(x => set2.has(x)).length;
+    // Union
+    const union = new Set([...set1, ...set2]).size;
+    
+    // Jaccard similarity: intersection / union
+    return intersection / union;
+};
+
+
+const generateQuestions = async (topic, difficulty, numQuestions, previousQuestions = null) => {
     // const apiKey = process.env.GEMINI_API_KEY;
     const apiKeys = getGeminiApiKeys();
     // if (!apiKey) {
@@ -44,6 +71,17 @@ const generateQuestions = async (topic, difficulty, numQuestions) => {
 
     // const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
 
+    // Build context section if we have previous questions to avoid
+    let contextSection = '';
+    if (previousQuestions && Array.isArray(previousQuestions) && previousQuestions.length > 0) {
+        const questionList = previousQuestions
+            .slice(0, 50) // Limit to 25 questions to avoid token limits
+            .map((q, i) => `${i + 1}. ${q}`)
+            .join('\n');
+        
+        contextSection = `\n\n--- PREVIOUSLY ASKED QUESTIONS (DO NOT REPEAT) ---\n${questionList}\n\nIMPORTANT: Generate completely NEW questions. Do NOT create similar or rephrased versions of the above questions. Cover different aspects of "${topic}".\n---`;
+    }
+    console.log(contextSection);
     // This is the "system prompt" that instructs the AI.
     const prompt = `
         You are a helpful assistant designed to create quiz questions.
@@ -56,7 +94,8 @@ const generateQuestions = async (topic, difficulty, numQuestions) => {
         If you're provided a topic , return that topic in the json otherwise mark the questions as the topic according to you .
         Format the output as a valid JSON array of objects, where each object has "statement", "options", "correctAnswer" (as an array with single correct answer) and "topic" keys.
         IMPORTANT: correctAnswer must be an array containing the correct option(s), even if there's only one correct answer.
-        Do not include any text or markdown formatting outside of the JSON array itself.
+        U may use Interned searching for the latest news or context around the topic 
+        Do not include any text or markdown formatting outside of the JSON array itself.${contextSection}
     `;
     for (const apiKey of apiKeys) {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
@@ -144,7 +183,45 @@ const generateQuestions = async (topic, difficulty, numQuestions) => {
     // }
 };
 
-const createQuiz = async (topic, difficulty, numQuestions) => {
+const fetchPreviousQuestions = async (topic, limit = 50) => {
+    try {
+        // Extract keywords from input topic
+        const inputKeywords = extractKeywords(topic);
+        
+        if (inputKeywords.length === 0) {
+            return []; // No valid keywords
+        }
+        
+        // Find questions with matching keywords using text search or keyword array
+        // Note: This only searches AI-generated and manual questions
+        // NPTEL questions are stored in a separate Nptel collection
+        const questions = await Question.find({
+            $or: [
+                { topicKeywords: { $in: inputKeywords } }, // Match any keyword
+                { topic: { $regex: new RegExp(inputKeywords.join('|'), 'i') } } // Regex fallback
+            ]
+        }).select('statement topic topicKeywords').limit(200); // Get more for filtering
+        
+        // Calculate similarity scores and filter
+        const scoredQuestions = questions
+            .map(q => ({
+                statement: q.statement,
+                similarity: calculateTopicSimilarity(inputKeywords, q.topicKeywords || extractKeywords(q.topic))
+            }))
+            .filter(q => q.similarity > 0.2) // Keep questions with >20% similarity
+            .sort((a, b) => b.similarity - a.similarity) // Sort by similarity score (descending)
+            .slice(0, limit) // Take top N
+            .map(q => q.statement); // Extract just the statements
+        
+        console.log(`Found ${scoredQuestions.length} similar questions for topic: "${topic}"`);
+        return scoredQuestions;
+    } catch (error) {
+        console.error('Error fetching previous questions:', error);
+        return []; // Return empty array on error to not block contest creation
+    }
+};
+
+const createQuiz = async (topic, difficulty, numQuestions, previousQuestions = null) => {
     if (!topic || !difficulty || !numQuestions) {
         return res.status(400).json({
             success: false,
@@ -153,7 +230,7 @@ const createQuiz = async (topic, difficulty, numQuestions) => {
     }
 
     try {
-        const questions = await generateQuestions(topic, difficulty, parseInt(numQuestions, 10));
+        const questions = await generateQuestions(topic, difficulty, parseInt(numQuestions, 10), previousQuestions);
         if (!questions || questions.length === 0) {
             return res.status(500).json({ success: false, message: 'The AI failed to generate questions for the given topic. Please try another topic.' });
         }
@@ -164,9 +241,30 @@ const createQuiz = async (topic, difficulty, numQuestions) => {
     }
 };
 
-const createContest = async (topic, difficulty, numQuestions, contestDetails) => {
+const createContest = async (topic, difficulty, numQuestions, contestDetails, previousQuestions = null) => {
     try {
-        const questions = await createQuiz(topic, difficulty, numQuestions);
+        const questions = await createQuiz(topic, difficulty, numQuestions, previousQuestions);
+        
+        // Save questions to Question collection for future reference
+        const keywords = extractKeywords(topic);
+        const questionDocs = questions.map(q => ({
+            statement: q.statement,
+            options: q.options,
+            correctAnswer: q.correctAnswer,
+            topic: q.topic || topic,
+            topicKeywords: keywords,
+            difficulty: difficulty,
+            source: 'ai'
+        }));
+        
+        // Bulk insert questions (ignore duplicates)
+        await Question.insertMany(questionDocs, { ordered: false }).catch(err => {
+            // Ignore duplicate key errors, log others
+            if (err.code !== 11000) {
+                console.error('Error saving questions:', err);
+            }
+        });
+        
         const newContest = new Contest({
             code: contestDetails.code,
             admin: contestDetails.adminId,
@@ -200,6 +298,9 @@ export const createContestController = async (req, res) => {
     }
 
     try {
+        // Fetch previous questions for this topic to avoid repetition (top 50 similar)
+        const previousQuestions = await fetchPreviousQuestions(topic, 50);
+        
         const code = await generateUniqueCode();
 
         const contestDetails = {
@@ -214,7 +315,7 @@ export const createContestController = async (req, res) => {
             capacity: mode === "duel" ? 2 : 8,
         };
 
-        const newContest = await createContest(topic, difficulty, numQuestions, contestDetails);
+        const newContest = await createContest(topic, difficulty, numQuestions, contestDetails, previousQuestions);
         await User.findByIdAndUpdate(adminId, { $push: { contests: newContest._id } });
         return res.status(201).json({
             success: true,
