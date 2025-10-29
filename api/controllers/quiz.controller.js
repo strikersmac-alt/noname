@@ -75,7 +75,7 @@ const generateQuestions = async (topic, difficulty, numQuestions, previousQuesti
     let contextSection = '';
     if (previousQuestions && Array.isArray(previousQuestions) && previousQuestions.length > 0) {
         const questionList = previousQuestions
-            .slice(0, 50) // Limit to 25 questions to avoid token limits
+            .slice(0, 50) // Limit to 50 questions to avoid token limits
             .map((q, i) => `${i + 1}. ${q}`)
             .join('\n');
         
@@ -94,7 +94,7 @@ const generateQuestions = async (topic, difficulty, numQuestions, previousQuesti
         If you're provided a topic , return that topic in the json otherwise mark the questions as the topic according to you .
         Format the output as a valid JSON array of objects, where each object has "statement", "options", "correctAnswer" (as an array with single correct answer) and "topic" keys.
         IMPORTANT: correctAnswer must be an array containing the correct option(s), even if there's only one correct answer.
-        U may use Interned searching for the latest news or context around the topic 
+        U may use Internet searching for the latest news or context around the topic 
         Do not include any text or markdown formatting outside of the JSON array itself.${contextSection}
     `;
     for (const apiKey of apiKeys) {
