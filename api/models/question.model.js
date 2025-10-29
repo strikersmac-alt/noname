@@ -23,6 +23,10 @@ const questionSchema = new mongoose.Schema(
       type: [String], // Extracted keywords for better matching
       index: true,
     },
+    relatedTopics: {
+      type: [String], // AI-generated related/generalized topics (e.g., "DSA" → ["data structures", "algorithms", "programming"])
+      index: true,
+    },
     difficulty: {
       type: String,
       enum: ["easy", "medium", "hard"],
@@ -43,6 +47,7 @@ const questionSchema = new mongoose.Schema(
 // Compound index for efficient topic + difficulty queries
 questionSchema.index({ topic: 1, difficulty: 1, createdAt: -1 });
 questionSchema.index({ topicKeywords: 1, createdAt: -1 });
+questionSchema.index({ relatedTopics: 1, createdAt: -1 });
 
 // Text index for full-text search on statement and topic
 questionSchema.index({ statement: "text", topic: "text" });

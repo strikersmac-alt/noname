@@ -92,8 +92,13 @@ const generateQuestions = async (topic, difficulty, numQuestions, previousQuesti
         Each question statement should be clear and consise
         Make sure the questions are bit challenging as most of the users will be from college going age group.
         If you're provided a topic , return that topic in the json otherwise mark the questions as the topic according to you .
-        Format the output as a valid JSON array of objects, where each object has "statement", "options", "correctAnswer" (as an array with single correct answer) and "topic" keys.
+        Format the output as a valid JSON array of objects, where each object has "statement", "options", "correctAnswer" (as an array with single correct answer), "topic", and "relatedTopics" keys.
         IMPORTANT: correctAnswer must be an array containing the correct option(s), even if there's only one correct answer.
+        IMPORTANT: relatedTopics must be an array of 3 related/generalized topics that this question belongs to. For example:
+        - If topic is "Arrays", relatedTopics could be ["data structures", "dsa", "programming"]
+        - If topic is "React Hooks", relatedTopics could be ["react", "web development", "frontend"]
+        - If topic is "Binary Search", relatedTopics could be ["algorithms", "searching", "dsa"]
+        This helps categorize questions for better topic matching.
         U may use Internet searching for the latest news or context around the topic 
         Do not include any text or markdown formatting outside of the JSON array itself.${contextSection}
     `;
@@ -198,16 +203,33 @@ const fetchPreviousQuestions = async (topic, limit = 50) => {
         const questions = await Question.find({
             $or: [
                 { topicKeywords: { $in: inputKeywords } }, // Match any keyword
-                { topic: { $regex: new RegExp(inputKeywords.join('|'), 'i') } } // Regex fallback
+                { topic: { $regex: new RegExp(inputKeywords.join('|'), 'i') } }, // Regex fallback on topic
+                { relatedTopics: { $in: inputKeywords } }, // Match AI-generated related topics
+                { relatedTopics: { $regex: new RegExp(inputKeywords.join('|'), 'i') } } // Regex on related topics
             ]
-        }).select('statement topic topicKeywords').limit(200); // Get more for filtering
+        }).select('statement topic topicKeywords relatedTopics').limit(200); // Get more for filtering
         
         // Calculate similarity scores and filter
         const scoredQuestions = questions
-            .map(q => ({
-                statement: q.statement,
-                similarity: calculateTopicSimilarity(inputKeywords, q.topicKeywords || extractKeywords(q.topic))
-            }))
+            .map(q => {
+                // Calculate keyword similarity
+                const keywordSimilarity = calculateTopicSimilarity(inputKeywords, q.topicKeywords || extractKeywords(q.topic));
+                
+                // Calculate relatedTopics similarity (if AI provided related topics)
+                let relatedSimilarity = 0;
+                if (q.relatedTopics && q.relatedTopics.length > 0) {
+                    const relatedKeywords = q.relatedTopics.flatMap(rt => extractKeywords(rt));
+                    relatedSimilarity = calculateTopicSimilarity(inputKeywords, relatedKeywords);
+                }
+                
+                // Take the maximum similarity (either from keywords or related topics)
+                const similarity = Math.max(keywordSimilarity, relatedSimilarity);
+                
+                return {
+                    statement: q.statement,
+                    similarity
+                };
+            })
             .filter(q => q.similarity > 0.2) // Keep questions with >20% similarity
             .sort((a, b) => b.similarity - a.similarity) // Sort by similarity score (descending)
             .slice(0, limit) // Take top N
@@ -253,11 +275,13 @@ const createContest = async (topic, difficulty, numQuestions, contestDetails, pr
             correctAnswer: q.correctAnswer,
             topic: q.topic || topic,
             topicKeywords: keywords,
+            relatedTopics: q.relatedTopics || [], // AI-generated related topics
             difficulty: difficulty,
             source: 'ai'
         }));
         
         // Bulk insert questions (ignore duplicates)
+        console.log(questionDocs);
         await Question.insertMany(questionDocs, { ordered: false }).catch(err => {
             // Ignore duplicate key errors, log others
             if (err.code !== 11000) {
