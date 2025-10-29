@@ -392,32 +392,32 @@ const initSockets = (io) => {
     });
 };
 
-// Helper to compute standings: Aggregate scores per user
+// Helper to compute standings
 async function computeStandings(contestId) {
   const contest = await Contest.findById(contestId)
     .populate('users', 'name profilePicture')
-    .select('standing startTime');  // Include startTime
+    .select('standing startTime');
 
   const scores = {};
-
   contest.standing.forEach(s => {
     const userId = s.user.toString();
     if (!scores[userId]) scores[userId] = 0;
     scores[userId] += s.result;
   });
 
-  // Compute timeTaken per user (same logic as controller)
+  // NEW: Declare startTime here (add if missing)
   const startTime = contest.startTime || 0;
+
   const standings = Object.entries(scores).map(([userId, score]) => {
     const userEntries = contest.standing.filter(s => s.user.toString() === userId);
-    let timeTaken = 999999999;  // Sentinel for unfinished
+    let timeTaken = 999999999;
     if (userEntries.length > 0) {
       const timestamps = userEntries
         .map(e => e.timestamp ? new Date(e.timestamp).getTime() : 0)
         .filter(t => t > 0);
       if (timestamps.length > 0) {
         const maxTimestamp = Math.max(...timestamps);
-        timeTaken = maxTimestamp - startTime;
+        timeTaken = maxTimestamp - startTime;  // Now defined!
         if (timeTaken < 0) timeTaken = 0;
       }
     }
@@ -427,11 +427,11 @@ async function computeStandings(contestId) {
       userId, 
       name: user?.name || 'Unknown', 
       score,
-      timeTaken  // Include for frontend display and future sorting
+      timeTaken,
+      attempted: userEntries.length  // Include for frontend
     };
   });
 
-  // Sort by score DESC, then timeTaken ASC
   standings.sort((a, b) => {
     if (b.score !== a.score) {
       return b.score - a.score;

@@ -1,28 +1,26 @@
-import Contest from '../models/contest.model.js';
-import mongoose from 'mongoose';
+import Contest from "../models/contest.model.js";
+import mongoose from "mongoose";
 
 // ================= In-memory cache (FIFO eviction) =================
 const CONTEST_CACHE_LIMIT = 10;
 // contestId -> { adminId: string, userIds: Set<string>, answerKey: Map<string, string> } // questionId -> correctAnswerText
 const contestCache = new Map();
 
-export const normalize = (str) => (str ?? '').toString().trim();
+export const normalize = (str) => (str ?? "").toString().trim();
 
 // Helper to normalize array of answers for comparison
 export const normalizeAnswerArray = (answers) => {
   if (!Array.isArray(answers)) {
     return [normalize(answers)];
   }
-  return answers.map(a => normalize(a)).sort();
+  return answers.map((a) => normalize(a)).sort();
 };
 
 const buildAndCacheContest = async (contestId, useMongoId = false) => {
-  const query = useMongoId 
-    ? { _id: contestId }
-    : { code: contestId };
-    
+  const query = useMongoId ? { _id: contestId } : { code: contestId };
+
   const contest = await Contest.findOne(query)
-    .select('code admin users questions._id questions.correctAnswer')
+    .select("code admin users questions._id questions.correctAnswer")
     .lean();
 
   if (!contest) return null;
@@ -35,37 +33,38 @@ const buildAndCacheContest = async (contestId, useMongoId = false) => {
 
   const entry = {
     adminId: String(contest.admin),
-    userIds: new Set((contest.users || []).map(u => String(u))),
+    userIds: new Set((contest.users || []).map((u) => String(u))),
     answerKey,
     code: contest.code,
   };
 
   // Cache by both code and _id for flexible lookup
   const cacheKey = useMongoId ? String(contestId) : contest.code;
-  
+
   // Evict oldest if over limit (FIFO)
   if (contestCache.size >= CONTEST_CACHE_LIMIT) {
     const oldestKey = contestCache.keys().next().value;
     contestCache.delete(oldestKey);
   }
   contestCache.set(cacheKey, entry);
-  
+
   // Also cache by the other key for dual access
   if (useMongoId) {
     contestCache.set(contest.code, entry);
   } else {
     contestCache.set(String(contest._id), entry);
   }
-  
+
   return entry;
 };
 
 export const getContestEntry = async (contestId) => {
   const key = String(contestId);
   if (contestCache.has(key)) return contestCache.get(key);
-  
+
   // Check if it's a MongoDB ObjectId (24 hex chars) or a contest code (6 digits)
-  const isMongoId = mongoose.Types.ObjectId.isValid(contestId) && contestId.length === 24;
+  const isMongoId =
+    mongoose.Types.ObjectId.isValid(contestId) && contestId.length === 24;
   return await buildAndCacheContest(key, isMongoId);
 };
 
@@ -78,24 +77,32 @@ export const getContestQuestionsById = async (req, res) => {
     const { id } = req.params;
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ success: false, message: 'Invalid contest id' });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid contest id" });
     }
 
-    const contest = await Contest.findById(id).select('code mode contestType isLive duration startTime timeZone admin questions._id questions.statement questions.options questions.topic questions.correctAnswer questions.week');
+    const contest = await Contest.findById(id).select(
+      "code mode contestType isLive duration startTime timeZone admin questions._id questions.statement questions.options questions.topic questions.correctAnswer questions.week"
+    );
 
     if (!contest) {
-      return res.status(404).json({ success: false, message: 'Contest not found' });
+      return res
+        .status(404)
+        .json({ success: false, message: "Contest not found" });
     }
 
     return res.status(200).json({
       success: true,
-      questions: contest.questions.map(q => ({ 
-        _id: q._id, 
-        statement: q.statement, 
-        options: q.options, 
+      questions: contest.questions.map((q) => ({
+        _id: q._id,
+        statement: q.statement,
+        options: q.options,
         topic: q.topic,
         week: q.week,
-        correctAnswerCount: Array.isArray(q.correctAnswer) ? q.correctAnswer.length : 1 
+        correctAnswerCount: Array.isArray(q.correctAnswer)
+          ? q.correctAnswer.length
+          : 1,
       })),
       meta: {
         code: contest.code,
@@ -107,11 +114,13 @@ export const getContestQuestionsById = async (req, res) => {
         timeZone: contest.timeZone,
         id: contest._id,
         adminId: contest.admin,
-      }
+      },
     });
   } catch (error) {
-    console.error('Error fetching contest questions by id:', error);
-    return res.status(500).json({ success: false, message: 'Internal server error' });
+    console.error("Error fetching contest questions by id:", error);
+    return res
+      .status(500)
+      .json({ success: false, message: "Internal server error" });
   }
 };
 
@@ -122,24 +131,32 @@ export const getContestQuestionsByCode = async (req, res) => {
     const { code } = req.params;
 
     if (!code) {
-      return res.status(400).json({ success: false, message: 'Contest code is required' });
+      return res
+        .status(400)
+        .json({ success: false, message: "Contest code is required" });
     }
 
-    const contest = await Contest.findOne({ code }).select('code mode contestType isLive duration startTime timeZone admin questions._id questions.statement questions.options questions.topic questions.correctAnswer questions.week');
+    const contest = await Contest.findOne({ code }).select(
+      "code mode contestType isLive duration startTime timeZone admin questions._id questions.statement questions.options questions.topic questions.correctAnswer questions.week"
+    );
 
     if (!contest) {
-      return res.status(404).json({ success: false, message: 'Contest not found' });
+      return res
+        .status(404)
+        .json({ success: false, message: "Contest not found" });
     }
 
     return res.status(200).json({
       success: true,
-      questions: contest.questions.map(q => ({ 
-        _id: q._id, 
-        statement: q.statement, 
-        options: q.options, 
+      questions: contest.questions.map((q) => ({
+        _id: q._id,
+        statement: q.statement,
+        options: q.options,
         topic: q.topic,
         week: q.week,
-        correctAnswerCount: Array.isArray(q.correctAnswer) ? q.correctAnswer.length : 1 
+        correctAnswerCount: Array.isArray(q.correctAnswer)
+          ? q.correctAnswer.length
+          : 1,
       })),
       meta: {
         code: contest.code,
@@ -151,11 +168,13 @@ export const getContestQuestionsByCode = async (req, res) => {
         timeZone: contest.timeZone,
         id: contest._id,
         adminId: contest.admin,
-      }
+      },
     });
   } catch (error) {
-    console.error('Error fetching contest questions by code:', error);
-    return res.status(500).json({ success: false, message: 'Internal server error' });
+    console.error("Error fetching contest questions by code:", error);
+    return res
+      .status(500)
+      .json({ success: false, message: "Internal server error" });
   }
 };
 
@@ -169,36 +188,53 @@ export const validateContestAnswer = async (req, res) => {
     const { userId, questionId, response } = req.body || {};
 
     if (!roomId) {
-      return res.status(400).json({ success: false, message: 'roomId is required in path' });
+      return res
+        .status(400)
+        .json({ success: false, message: "roomId is required in path" });
     }
-    if (!userId || !questionId || (response === undefined || response === null)) {
-      return res.status(400).json({ success: false, message: 'userId, questionId and response are required' });
+    if (!userId || !questionId || response === undefined || response === null) {
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "userId, questionId and response are required",
+        });
     }
 
     const entry = await getContestEntry(roomId);
     if (!entry) {
-      return res.status(404).json({ success: false, message: 'Contest not found' });
+      return res
+        .status(404)
+        .json({ success: false, message: "Contest not found" });
     }
 
-    const enrolled = String(entry.adminId) === String(userId) || entry.userIds.has(String(userId));
+    const enrolled =
+      String(entry.adminId) === String(userId) ||
+      entry.userIds.has(String(userId));
     if (!enrolled) {
-      return res.status(403).json({ success: false, message: 'User not enrolled in contest' });
+      return res
+        .status(403)
+        .json({ success: false, message: "User not enrolled in contest" });
     }
 
     const ans = entry.answerKey.get(String(questionId));
     if (!ans) {
-      return res.status(400).json({ success: false, message: 'Invalid question for this contest' });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid question for this contest" });
     }
 
     let correct = false;
-    if (typeof response === 'string') {
+    if (typeof response === "string") {
       correct = normalize(response) === normalize(ans);
     }
 
     return res.status(200).json({ success: true, correct });
   } catch (error) {
-    console.error('Error validating contest answer:', error);
-    return res.status(500).json({ success: false, message: 'Internal server error' });
+    console.error("Error validating contest answer:", error);
+    return res
+      .status(500)
+      .json({ success: false, message: "Internal server error" });
   }
 };
 
@@ -209,47 +245,56 @@ export const getContestStandings = async (req, res) => {
     const { id } = req.params;
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ success: false, message: 'Invalid contest id' });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid contest id" });
     }
 
     const contest = await Contest.findById(id)
-      .select('code mode isLive standing users startTime')  // Include startTime
-      .populate('users', 'name profilePicture')
+      .select("code mode isLive standing users startTime") // Include startTime
+      .populate("users", "name profilePicture")
       .lean();
 
     if (!contest) {
-      return res.status(404).json({ success: false, message: 'Contest not found' });
+      return res
+        .status(404)
+        .json({ success: false, message: "Contest not found" });
     }
 
     // Compute scores from standing array
     const scores = {};
-    (contest.standing || []).forEach(entry => {
+    (contest.standing || []).forEach((entry) => {
       const userId = String(entry.user);
       scores[userId] = (scores[userId] || 0) + (entry.result || 0);
     });
 
-    // Compute timeTaken per user
-    const startTime = contest.startTime || 0;  // ms since epoch
+    // NEW: Declare startTime here (MISSING LINE - add this!)
+    const startTime = contest.startTime || 0;
+
+    // Compute timeTaken and attempted per user
     const standings = Object.entries(scores).map(([userId, score]) => {
-      const userEntries = contest.standing.filter(s => String(s.user) === userId);
-      let timeTaken = 999999999;  // Sentinel for unfinished (sorts last)
+      const userEntries = contest.standing.filter(
+        (s) => String(s.user) === userId
+      );
+      let timeTaken = 999999999; // Sentinel for unfinished
       if (userEntries.length > 0) {
         const timestamps = userEntries
-          .map(e => e.timestamp ? new Date(e.timestamp).getTime() : 0)
-          .filter(t => t > 0);
+          .map((e) => (e.timestamp ? new Date(e.timestamp).getTime() : 0))
+          .filter((t) => t > 0);
         if (timestamps.length > 0) {
           const maxTimestamp = Math.max(...timestamps);
-          timeTaken = maxTimestamp - startTime;
-          if (timeTaken < 0) timeTaken = 0;  // Edge case safeguard
+          timeTaken = maxTimestamp - startTime;  // Now defined!
+          if (timeTaken < 0) timeTaken = 0;
         }
       }
 
-      const user = contest.users.find(u => String(u._id) === userId);
-      return { 
-        userId, 
-        name: user?.name || 'Unknown', 
+      const user = contest.users.find((u) => String(u._id) === userId);
+      return {
+        userId,
+        name: user?.name || "Unknown",
         score,
-        timeTaken  // Include in response
+        timeTaken,
+        attempted: userEntries.length, // Number of questions attempted by this user
       };
     });
 
@@ -263,17 +308,18 @@ export const getContestStandings = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      standings,  // Now includes timeTaken
+      standings, // Now includes timeTaken & attempted
       isLive: contest.isLive,
       contestCode: contest.code,
-      mode: contest.mode
+      mode: contest.mode,
     });
   } catch (error) {
-    console.error('Error fetching contest standings:', error);
-    return res.status(500).json({ success: false, message: 'Internal server error' });
+    console.error("Error fetching contest standings:", error);
+    return res
+      .status(500)
+      .json({ success: false, message: "Internal server error" });
   }
 };
-
 // GET /api/contest/:id/summary
 // Returns contest summary with questions, correct answers, and user's responses
 export const getContestSummary = async (req, res) => {
@@ -285,51 +331,63 @@ export const getContestSummary = async (req, res) => {
     // console.log('Contest summary request - User:', req.user, 'UserId:', userId);
 
     if (!userId) {
-      return res.status(401).json({ success: false, message: 'Unauthorized' });
+      return res.status(401).json({ success: false, message: "Unauthorized" });
     }
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ success: false, message: 'Invalid contest id' });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid contest id" });
     }
 
     const contest = await Contest.findById(id)
-      .select('code mode isLive duration startTime timeZone admin questions standing users')
+      .select(
+        "code mode isLive duration startTime timeZone admin questions standing users"
+      )
       .lean();
 
     if (!contest) {
-      return res.status(404).json({ success: false, message: 'Contest not found' });
+      return res
+        .status(404)
+        .json({ success: false, message: "Contest not found" });
     }
 
     // console.log('Contest found:', id, 'Users:', contest.users.length, 'Standing entries:', contest.standing.length);
 
     // Check if user participated in the contest
-    const isParticipant = contest.users.some(u => String(u) === String(userId)) || 
-                         String(contest.admin) === String(userId);
+    const isParticipant =
+      contest.users.some((u) => String(u) === String(userId)) ||
+      String(contest.admin) === String(userId);
 
     if (!isParticipant) {
       // console.log('User not participant. UserId:', userId, 'Contest users:', contest.users.map(u => String(u)));
-      return res.status(403).json({ success: false, message: 'You did not participate in this contest' });
+      return res
+        .status(403)
+        .json({
+          success: false,
+          message: "You did not participate in this contest",
+        });
     }
 
     // Get user's answers from standing
     const userAnswers = contest.standing
-      .filter(s => String(s.user) === String(userId))
-      .map(s => ({
+      .filter((s) => String(s.user) === String(userId))
+      .map((s) => ({
         questionId: String(s.question),
         isCorrect: s.result === 1,
-        answer: s.answer || [] // Store the actual answer if available
+        answer: s.answer || [], // Store the actual answer if available
       }));
 
     // console.log('User answers found:', userAnswers.length);
 
     // Return questions with correct answers
-    const questions = contest.questions.map(q => ({
+    const questions = contest.questions.map((q) => ({
       _id: q._id,
       statement: q.statement,
       options: q.options,
       correctAnswer: q.correctAnswer,
       topic: q.topic,
-      week: q.week
+      week: q.week,
     }));
 
     return res.status(200).json({
@@ -345,10 +403,12 @@ export const getContestSummary = async (req, res) => {
         timeZone: contest.timeZone,
         id: contest._id,
         adminId: contest.admin,
-      }
+      },
     });
   } catch (error) {
-    console.error('Error fetching contest summary:', error);
-    return res.status(500).json({ success: false, message: 'Internal server error' });
+    console.error("Error fetching contest summary:", error);
+    return res
+      .status(500)
+      .json({ success: false, message: "Internal server error" });
   }
 };
