@@ -394,24 +394,52 @@ const initSockets = (io) => {
 
 // Helper to compute standings: Aggregate scores per user
 async function computeStandings(contestId) {
-    const contest = await Contest.findById(contestId).populate('users', 'name profilePicture');
-    const scores = {};
+  const contest = await Contest.findById(contestId)
+    .populate('users', 'name profilePicture')
+    .select('standing startTime');  // Include startTime
 
-    contest.standing.forEach(s => {
-        const userId = s.user.toString();
-        if (!scores[userId]) scores[userId] = 0;
-        scores[userId] += s.result;
-    });
+  const scores = {};
 
-    // Sort by score descending
-    const standings = Object.entries(scores)
-        .map(([userId, score]) => {
-            const user = contest.users.find(u => u._id.toString() === userId);
-            return { userId, name: user?.name || 'Unknown', score };
-        })
-        .sort((a, b) => b.score - a.score);
+  contest.standing.forEach(s => {
+    const userId = s.user.toString();
+    if (!scores[userId]) scores[userId] = 0;
+    scores[userId] += s.result;
+  });
 
-    return standings;
+  // Compute timeTaken per user (same logic as controller)
+  const startTime = contest.startTime || 0;
+  const standings = Object.entries(scores).map(([userId, score]) => {
+    const userEntries = contest.standing.filter(s => s.user.toString() === userId);
+    let timeTaken = 999999999;  // Sentinel for unfinished
+    if (userEntries.length > 0) {
+      const timestamps = userEntries
+        .map(e => e.timestamp ? new Date(e.timestamp).getTime() : 0)
+        .filter(t => t > 0);
+      if (timestamps.length > 0) {
+        const maxTimestamp = Math.max(...timestamps);
+        timeTaken = maxTimestamp - startTime;
+        if (timeTaken < 0) timeTaken = 0;
+      }
+    }
+
+    const user = contest.users.find(u => u._id.toString() === userId);
+    return { 
+      userId, 
+      name: user?.name || 'Unknown', 
+      score,
+      timeTaken  // Include for frontend display and future sorting
+    };
+  });
+
+  // Sort by score DESC, then timeTaken ASC
+  standings.sort((a, b) => {
+    if (b.score !== a.score) {
+      return b.score - a.score;
+    }
+    return a.timeTaken - b.timeTaken;
+  });
+
+  return standings;
 }
 
 export default initSockets;

@@ -39,6 +39,11 @@ const resultSchema = new mongoose.Schema({
   answer: {
     type: mongoose.Schema.Types.Mixed, // Can be string or array of strings
   },
+  // Add timestamp for time-based tiebreaker
+  timestamp: {
+    type: Date,
+    default: Date.now
+  },
 });
 
 const contestSchema = new mongoose.Schema(
@@ -79,7 +84,7 @@ const contestSchema = new mongoose.Schema(
       default: 10
     }, 
     startTime: {
-      type: String, // unix timestamp
+      type: Number,
     },
     timeZone: {
       type: String

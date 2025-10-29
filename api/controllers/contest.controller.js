@@ -213,7 +213,7 @@ export const getContestStandings = async (req, res) => {
     }
 
     const contest = await Contest.findById(id)
-      .select('code mode isLive standing users')
+      .select('code mode isLive standing users startTime')  // Include startTime
       .populate('users', 'name profilePicture')
       .lean();
 
@@ -221,28 +221,49 @@ export const getContestStandings = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Contest not found' });
     }
 
-    // Compute standings from the standing array
+    // Compute scores from standing array
     const scores = {};
     (contest.standing || []).forEach(entry => {
       const userId = String(entry.user);
       scores[userId] = (scores[userId] || 0) + (entry.result || 0);
     });
 
-    // Create standings array with user details
-    const standings = Object.entries(scores)
-      .map(([userId, score]) => {
-        const user = contest.users.find(u => String(u._id) === userId);
-        return { 
-          userId, 
-          name: user?.name || 'Unknown', 
-          score 
-        };
-      })
-      .sort((a, b) => b.score - a.score);
+    // Compute timeTaken per user
+    const startTime = contest.startTime || 0;  // ms since epoch
+    const standings = Object.entries(scores).map(([userId, score]) => {
+      const userEntries = contest.standing.filter(s => String(s.user) === userId);
+      let timeTaken = 999999999;  // Sentinel for unfinished (sorts last)
+      if (userEntries.length > 0) {
+        const timestamps = userEntries
+          .map(e => e.timestamp ? new Date(e.timestamp).getTime() : 0)
+          .filter(t => t > 0);
+        if (timestamps.length > 0) {
+          const maxTimestamp = Math.max(...timestamps);
+          timeTaken = maxTimestamp - startTime;
+          if (timeTaken < 0) timeTaken = 0;  // Edge case safeguard
+        }
+      }
+
+      const user = contest.users.find(u => String(u._id) === userId);
+      return { 
+        userId, 
+        name: user?.name || 'Unknown', 
+        score,
+        timeTaken  // Include in response
+      };
+    });
+
+    // Sort by score DESC, then timeTaken ASC (faster first)
+    standings.sort((a, b) => {
+      if (b.score !== a.score) {
+        return b.score - a.score;
+      }
+      return a.timeTaken - b.timeTaken;
+    });
 
     return res.status(200).json({
       success: true,
-      standings,
+      standings,  // Now includes timeTaken
       isLive: contest.isLive,
       contestCode: contest.code,
       mode: contest.mode
