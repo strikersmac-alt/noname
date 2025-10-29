@@ -137,7 +137,7 @@ export const getContestQuestionsByCode = async (req, res) => {
     }
 
     const contest = await Contest.findOne({ code }).select(
-      "code mode contestType isLive duration startTime timeZone admin questions._id questions.statement questions.options questions.topic questions.correctAnswer questions.week"
+      "code mode contestType isLive duration startTime timeZone admin status questions._id questions.statement questions.options questions.topic questions.correctAnswer questions.week"
     );
 
     if (!contest) {
@@ -166,6 +166,7 @@ export const getContestQuestionsByCode = async (req, res) => {
         duration: contest.duration,
         startTime: contest.startTime,
         timeZone: contest.timeZone,
+        status: contest.status,
         id: contest._id,
         adminId: contest.admin,
       },
@@ -251,7 +252,7 @@ export const getContestStandings = async (req, res) => {
     }
 
     const contest = await Contest.findById(id)
-      .select("code mode isLive standing users startTime") // Include startTime
+      .select("code mode isLive standing users startTime status") // Include startTime
       .populate("users", "name profilePicture")
       .lean();
 
@@ -312,6 +313,7 @@ export const getContestStandings = async (req, res) => {
       isLive: contest.isLive,
       contestCode: contest.code,
       mode: contest.mode,
+      status : contest.status,
     });
   } catch (error) {
     console.error("Error fetching contest standings:", error);

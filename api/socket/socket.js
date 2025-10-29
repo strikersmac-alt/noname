@@ -196,7 +196,7 @@ const initSockets = (io) => {
                             socket.join(contestId);
                             return callback({ success: true, message: 'Joined contest room' });
                         } else {
-                            // Don't allow new users to join running contest
+                            // Don't allow new users to join running contest    
                             return callback({ success: false, message: 'Contest is already running. You cannot join now.' });
                         }
                     }
