@@ -137,7 +137,7 @@ export const getContestQuestionsByCode = async (req, res) => {
     }
 
     const contest = await Contest.findOne({ code }).select(
-      "code mode contestType isLive duration startTime timeZone admin status questions._id questions.statement questions.options questions.topic questions.correctAnswer questions.week"
+      "code mode contestType isLive duration startTime timeZone admin status users capacity questions._id questions.statement questions.options questions.topic questions.correctAnswer questions.week"
     );
 
     if (!contest) {
@@ -169,6 +169,8 @@ export const getContestQuestionsByCode = async (req, res) => {
         status: contest.status,
         id: contest._id,
         adminId: contest.admin,
+        users: contest.users.map((u) => u.toString()),
+        capacity: contest.capacity,
       },
     });
   } catch (error) {
@@ -194,12 +196,10 @@ export const validateContestAnswer = async (req, res) => {
         .json({ success: false, message: "roomId is required in path" });
     }
     if (!userId || !questionId || response === undefined || response === null) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "userId, questionId and response are required",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "userId, questionId and response are required",
+      });
     }
 
     const entry = await getContestEntry(roomId);
@@ -284,7 +284,7 @@ export const getContestStandings = async (req, res) => {
           .filter((t) => t > 0);
         if (timestamps.length > 0) {
           const maxTimestamp = Math.max(...timestamps);
-          timeTaken = maxTimestamp - startTime;  // Now defined!
+          timeTaken = maxTimestamp - startTime; // Now defined!
           if (timeTaken < 0) timeTaken = 0;
         }
       }
@@ -313,7 +313,7 @@ export const getContestStandings = async (req, res) => {
       isLive: contest.isLive,
       contestCode: contest.code,
       mode: contest.mode,
-      status : contest.status,
+      status: contest.status,
     });
   } catch (error) {
     console.error("Error fetching contest standings:", error);
@@ -363,12 +363,10 @@ export const getContestSummary = async (req, res) => {
 
     if (!isParticipant) {
       // console.log('User not participant. UserId:', userId, 'Contest users:', contest.users.map(u => String(u)));
-      return res
-        .status(403)
-        .json({
-          success: false,
-          message: "You did not participate in this contest",
-        });
+      return res.status(403).json({
+        success: false,
+        message: "You did not participate in this contest",
+      });
     }
 
     // Get user's answers from standing
