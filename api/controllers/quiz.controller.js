@@ -99,6 +99,9 @@ const generateQuestions = async (topic, difficulty, numQuestions, previousQuesti
         - If topic is "React Hooks", relatedTopics could be ["react", "web development", "frontend"]
         - If topic is "Binary Search", relatedTopics could be ["algorithms", "searching", "dsa"]
         This helps categorize questions for better topic matching.
+        Make Sure not to categorize or narrow down the topic given by the user , but try to follow a standard from the existing topics which are given to u 
+        Also Dont make the options too obvious and try to make them bit challenging 
+        Make sure the questions and options are not too lengthy to read and Keeep the quiz fun and exiting 
         U may use Internet searching for the latest news or context around the topic 
         Do not include any text or markdown formatting outside of the JSON array itself.${contextSection}
     `;
