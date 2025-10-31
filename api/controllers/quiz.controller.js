@@ -88,21 +88,35 @@ const generateQuestions = async (topic, difficulty, numQuestions, previousQuesti
         Generate exactly ${numQuestions} quiz questions about "${topic}" with a difficulty level of "${difficulty}".
         For each question, provide multiple-choice options and indicate the correct answer.
         Make Sure the quiz is well balanced with the difficulties and possibly google search for the details around the topic . 
-        U are essentialy based in India so try to make questions relevant to Indian context wherever possible. This is not a must but a preference.
-        Each question statement should be clear and consise
-        Make sure the questions are bit challenging as most of the users will be from college going age group.
-        If you're provided a topic , return that topic in the json otherwise mark the questions as the topic according to you .
+        You are essentially based in India so try to make questions relevant to Indian context wherever possible. This is not a must but a preference.
+        
+        QUESTION FORMATTING RULES:
+        - Each question statement should be CLEAR, CONCISE and DIRECT
+        - Keep questions under 150 characters when possible (max 200 characters)
+        - Avoid unnecessary context or overly verbose phrasing
+        - Get straight to the point
+        
+        OPTION FORMATTING RULES (CRITICAL):
+        - ALL options must be similar in length - avoid making one option significantly longer than others
+        - Distribute correct answers across different option positions (A, B, C, D) equally
+        - DELIBERATELY make the correct answer SHORT or MEDIUM length in at least 60% of questions
+        - The longest option should be the WRONG answer in most cases
+        - Keep all options concise (ideally under 80 characters each)
+        - Make distractors plausible and challenging
+        
+        Make sure the questions are challenging as most of the users will be from college going age group.
+        If you're provided a topic, return that topic in the json otherwise mark the questions as the topic according to you.
         Format the output as a valid JSON array of objects, where each object has "statement", "options", "correctAnswer" (as an array with single correct answer), "topic", and "relatedTopics" keys.
+        
         IMPORTANT: correctAnswer must be an array containing the correct option(s), even if there's only one correct answer.
         IMPORTANT: relatedTopics must be an array of 3 related/generalized topics that this question belongs to. For example:
         - If topic is "Arrays", relatedTopics could be ["data structures", "dsa", "programming"]
         - If topic is "React Hooks", relatedTopics could be ["react", "web development", "frontend"]
         - If topic is "Binary Search", relatedTopics could be ["algorithms", "searching", "dsa"]
         This helps categorize questions for better topic matching.
-        Make Sure not to categorize or narrow down the topic given by the user , but try to follow a standard from the existing topics which are given to u 
-        Also Dont make the options too obvious and try to make them bit challenging , like not necessarily the longest option is the correct answer .
-        Make sure the questions and options are not too lengthy to read and Keeep the quiz fun and exiting 
-        U may use Internet searching for the latest news or context around the topic 
+        Make Sure not to categorize or narrow down the topic given by the user, but try to follow a standard from the existing topics which are given to you.
+        
+        Keep the quiz fun and exciting! You may use Internet searching for the latest news or context around the topic.
         Do not include any text or markdown formatting outside of the JSON array itself.${contextSection}
     `;
     for (const apiKey of apiKeys) {
