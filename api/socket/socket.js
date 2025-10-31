@@ -1,5 +1,5 @@
 // import jwt from 'jsonwebtoken';
-// import Contest from '../models/contest.model.js'; 
+// import Contest from '../models/contest.model.js';
 // import User from '../models/user.model.js';
 
 // const initSockets = (io) => {
@@ -12,7 +12,7 @@
 //             if (err) {
 //                 return next(new Error('Authentication error: Invalid token'));
 //             }
-//             socket.user = user; 
+//             socket.user = user;
 //             next();
 //         });
 //     });
@@ -92,7 +92,7 @@
 //                 const score = isCorrect ? 1 : 0;
 
 //                 // Update or create result in standing
-//                 let result = contest.standing.find(s => 
+//                 let result = contest.standing.find(s =>
 //                     s.user.toString() === socket.user._id && s.question.toString() === questionId
 //                 );
 //                 if (!result) {
@@ -144,262 +144,315 @@
 // }
 
 // export default initSockets;
-import jwt from 'jsonwebtoken';
-import Contest from '../models/contest.model.js';
-import User from '../models/user.model.js';
-import { getContestEntry, normalize, normalizeAnswerArray } from '../controllers/contest.controller.js';
-import mongoose from 'mongoose';
+import jwt from "jsonwebtoken";
+import Contest from "../models/contest.model.js";
+import User from "../models/user.model.js";
+import {
+  getContestEntry,
+  normalize,
+  normalizeAnswerArray,
+} from "../controllers/contest.controller.js";
+import mongoose from "mongoose";
 const initSockets = (io) => {
-    io.use((socket, next) => {
-        const token = socket.handshake.headers.cookie
-            ?.split('; ')
-            .find(row => row.startsWith('authToken='))
-            ?.split('=')[1];
+  io.use((socket, next) => {
+    const token = socket.handshake.headers.cookie
+      ?.split("; ")
+      .find((row) => row.startsWith("authToken="))
+      ?.split("=")[1];
 
-        if (!token) {
-            return next(new Error('Authentication error: No token provided'));
-        }
-        jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
-            if (err) {
-                console.error('JWT verification failed:', err.message);
-                return next(new Error('Authentication error: Invalid token'));
-            }
+    if (!token) {
+      return next(new Error("Authentication error: No token provided"));
+    }
+    jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+      if (err) {
+        console.error("JWT verification failed:", err.message);
+        return next(new Error("Authentication error: Invalid token"));
+      }
 
-            // Set user with _id from the decoded token
-            socket.user = {
-                _id: decoded.userId,  // The JWT contains userId, not _id
-                email: decoded.email
+      // Set user with _id from the decoded token
+      socket.user = {
+        _id: decoded.userId, // The JWT contains userId, not _id
+        email: decoded.email,
+      };
+
+      next();
+    });
+  });
+
+  io.on("connection", (socket) => {
+    socket.on("joinContest", async (contestId, callback) => {
+      const session = await mongoose.startSession();
+
+      try {
+        await session.withTransaction(async () => {
+          // First check if contest exists and get basic info
+          const contest = await Contest.findById(contestId).session(session);
+          if (!contest || contest.status === "end") {
+            return callback({ success: false, message: "Contest not found" });
+          }
+
+          const currentUserId = socket.user._id;
+          const isUserInContest = contest.users.some(
+            (u) => u._id.toString() === currentUserId
+          );
+
+          // Check if contest is already running
+          if (contest.isLive) {
+            // If contest is live, allow ANYONE to join the socket room to observe standings.
+            socket.join(contestId);
+            console.log(
+              `User ${currentUserId} joined LIVE contest ${contestId} room as observer/participant.`
+            );
+            // Send current standings immediately upon joining the room
+            const standingsData = await computeStandings(contestId);
+            socket.emit("updateStandings", standingsData); // Send initial state to this socket
+            return callback({
+              success: true,
+              message: "Joined contest room for live standings",
+            });
+            // NOTE: We no longer prevent non-participants from joining the socket room if live.
+          }
+
+          if (!isUserInContest) {
+            // Only try to add if not live and not already in
+            // ... (atomic update logic with capacity check) ...
+            const capacity =
+              contest.mode === "duel"
+                ? 2
+                : contest.mode === "multiplayer"
+                ? 8
+                : contest.capacity;
+            const updateQuery = {
+              _id: contestId,
+              isLive: false,
+              users: { $ne: currentUserId },
             };
+            if (capacity) {
+              updateQuery[`users.${capacity - 1}`] = { $exists: false };
+            }
+            const updatedContest = await Contest.findOneAndUpdate(
+              updateQuery,
+              { $push: { users: currentUserId } },
+              { new: false, session }
+            );
 
-            next();
+            if (!updatedContest) {
+              // ... (handle failure - full or started) ...
+              if (capacity && contest.users.length >= capacity) {
+                return callback({
+                  success: false,
+                  message: "Contest has reached maximum capacity",
+                });
+              }
+              return callback({
+                success: false,
+                message:
+                  "Unable to join contest. It may have started or is full.",
+              });
+            }
+            await User.findByIdAndUpdate(
+              currentUserId,
+              { $addToSet: { contests: contestId } },
+              { session }
+            );
+          }
+
+          // Join the room for waiting participants too
+          socket.join(contestId);
+          console.log(
+            `User ${currentUserId} joined WAITING contest ${contestId} room.`
+          );
+          callback({ success: true, message: "Joined contest room" });
+
+          // Send participant list update for waiting room
+          const updatedContestData = await Contest.findById(contestId)
+            .populate("users", "name profilePicture") // Removed email
+            .session(session);
+
+          io.to(contestId).emit(
+            "updateParticipants",
+            updatedContestData.users.map((u) => ({
+              userId: u._id,
+              name: u.name,
+              profilePicture: u.profilePicture,
+            }))
+          );
         });
+      } catch (error) {
+        console.error("Error in joinContest:", error);
+        callback({ success: false, message: "Error joining contest" });
+      } finally {
+        session.endSession();
+      }
     });
 
-    io.on('connection', (socket) => {
-        socket.on('joinContest', async (contestId, callback) => {
-            const session = await mongoose.startSession();
+    socket.on("startContest", async (contestId, callback) => {
+      try {
+        const contest = await Contest.findById(contestId);
+        if (!contest) {
+          return callback({ success: false, message: "Contest not found" });
+        }
+        if (contest.admin.toString() !== socket.user._id) {
+          return callback({
+            success: false,
+            message: "Only admin can start the contest",
+          });
+        }
+        if (contest.isLive) {
+          return callback({ success: false, message: "Contest already live" });
+        }
 
-            try {
-                await session.withTransaction(async () => {
-                    // First check if contest exists and get basic info
-                    const contest = await Contest.findById(contestId).session(session);
-                    if (!contest || contest.status === "end") {
-                        return callback({ success: false, message: 'Contest not found' });
-                    }
+        const startTime = Date.now();
+        contest.isLive = true;
+        contest.status = "live";
+        contest.startTime = startTime;
+        await contest.save();
 
-                    // Check if contest is already running
-                    if (contest.isLive) {
-                        // Check if user is already enrolled (can view standings)
-                        const isUserInContest = contest.users.some(u => u._id.toString() === socket.user._id);
-                        if (isUserInContest) {
-                            // Allow enrolled users to join socket room for standings
-                            socket.join(contestId);
-                            return callback({ success: true, message: 'Joined contest room' });
-                        } else {
-                            // Don't allow new users to join running contest    
-                            return callback({ success: false, message: 'Contest is already running. You cannot join now.' });
-                        }
-                    }
-
-                    // Check if user is already in the contest
-                    const isUserInContest = contest.users.some(u => u._id.toString() === socket.user._id);
-
-                    // Only add user if contest is not live and user not already in contest
-                    if (!isUserInContest) {
-                        // Use atomic operation to add user with capacity check
-                        const updateQuery = {
-                            _id: contestId,
-                            isLive: false,
-                            users: { $ne: socket.user._id }, // Ensure user not already in array
-                        };
-
-                        const capacity = contest.mode === 'duel' ? 2 : contest.mode === 'multiplayer' ? 8 : contest.capacity;
-
-                        if (capacity) {
-                            updateQuery[`users.${capacity - 1}`] = { $exists: false }; 
-                        }
-
-                        const updatedContest = await Contest.findOneAndUpdate(
-                            updateQuery,
-                            { $push: { users: socket.user._id } },
-                            { new: false, session }
-                        );
-
-                        if (!updatedContest) {
-                            // Update failed - either capacity reached or contest started
-                            if (capacity && contest.users.length >= capacity) {
-                                return callback({ success: false, message: 'Contest has reached maximum capacity' });
-                            }
-                            return callback({ success: false, message: 'Unable to join contest. It may have started or is full.' });
-                        }
-
-                        // Update the user document to include the contest
-                        await User.findByIdAndUpdate(
-                            socket.user._id,
-                            { $addToSet: { contests: contestId } },
-                            { session }
-                        );
-                    }
-
-                    socket.join(contestId);
-                    callback({ success: true, message: 'Joined contest room' });
-
-                    // Send updated standings
-                    const standings = await computeStandings(contestId);
-                    socket.emit('updateStandings', standings);
-
-                    // Fetch fresh contest data with populated users
-                    const updatedContestData = await Contest.findById(contestId)
-                        .populate('users', 'name profilePicture email')
-                        .session(session);
-
-                    io.to(contestId).emit('updateParticipants', updatedContestData.users.map(u => ({
-                        userId: u._id,
-                        name: u.name,
-                        profilePicture: u.profilePicture,
-                    })));
-                });
-            } catch (error) {
-                console.error('Error in joinContest:', error);
-                callback({ success: false, message: 'Error joining contest' });
-            } finally {
-                session.endSession();
-            }
+        io.to(contestId).emit("contestStarted", {
+          startTime: startTime,
+          duration: contest.duration,
+          timeZone: contest.timeZone,
         });
+        callback({ success: true, message: "Contest started" });
 
-        socket.on('startContest', async (contestId, callback) => {
-            try {
-                const contest = await Contest.findById(contestId);
-                if (!contest) {
-                    return callback({ success: false, message: 'Contest not found' });
-                }
-                if (contest.admin.toString() !== socket.user._id) {
-                    return callback({ success: false, message: 'Only admin can start the contest' });
-                }
-                if (contest.isLive) {
-                    return callback({ success: false, message: 'Contest already live' });
-                }
-
-                const startTime = Date.now();
-                contest.isLive = true;
-                contest.status = "live";
-                contest.startTime = startTime;
-                await contest.save();
-
-                io.to(contestId).emit('contestStarted', {
-                    startTime: startTime,
-                    duration: contest.duration,
-                    timeZone: contest.timeZone,
-                });
-                callback({ success: true, message: 'Contest started' });
-
-                // Start timer to end contest after duration
-                setTimeout(async () => {
-                    contest.isLive = false;
-                    contest.status = "live";
-                    await contest.save();
-                    io.to(contestId).emit('contestEnded', { message: 'Contest duration ended' });
-                }, contest.duration * 60 * 1000); // duration in minutes
-            } catch (error) {
-                console.error('Error in startContest:', error);
-                callback({ success: false, message: 'Error starting contest' });
-            }
-        });
-
-        socket.on('submitAnswer', async ({ contestId, questionId, answer }, callback) => {
-            try {
-                // Use optimized in-memory cache for fast validation
-                const contestEntry = await getContestEntry(contestId);
-                if (!contestEntry) {
-                    return callback({ success: false, message: 'Contest not found' });
-                }
-
-                // Check if user is enrolled
-                const userId = String(socket.user._id);
-                const isEnrolled = contestEntry.adminId === userId || contestEntry.userIds.has(userId);
-                if (!isEnrolled) {
-                    return callback({ success: false, message: 'User not enrolled in contest' });
-                }
-
-                // Get correct answer from cache (O(1) lookup) - now an array
-                const correctAnswerArray = contestEntry.answerKey.get(String(questionId));
-                if (!correctAnswerArray) {
-                    return callback({ success: false, message: 'Question not found' });
-                }
-
-                // Validate answer - support both single answer and array of answers
-                const userAnswerArray = normalizeAnswerArray(answer);
-                const isCorrect = JSON.stringify(userAnswerArray) === JSON.stringify(correctAnswerArray);
-                const score = isCorrect ? 1 : 0;
-
-                // Now update the DB for standings (only one DB write)
-                const contest = await Contest.findById(contestId);
-                if (!contest || !contest.isLive) {
-                    return callback({ success: false, message: 'Contest not live' });
-                }
-
-                // Update or create result in standing
-                let result = contest.standing.find(s =>
-                    s.user.toString() === socket.user._id && s.question.toString() === questionId
-                );
-                if (!result) {
-                    result = { user: socket.user._id, question: questionId, result: score, answer: answer };
-                    contest.standing.push(result);
-                } else {
-                    result.result = score; // Allow resubmission
-                    result.answer = answer; // Store the user's answer
-                }
-                await contest.save();
-
-                // Send immediate feedback to user
-                callback({ success: true, isCorrect, message: isCorrect ? 'Correct!' : 'Wrong!' });
-
-                // Compute and broadcast new standings to room
-                const standings = await computeStandings(contestId);
-                io.to(contestId).emit('updateStandings', standings);
-
-                // Check if all participants have completed all questions
-                const totalQuestions = contest.questions.length;
-                const totalParticipants = contest.users.length;
-                const completedParticipants = new Set();
-
-                contest.standing.forEach(s => {
-                    const userId = s.user.toString();
-                    if (!completedParticipants.has(userId)) {
-                        const userAnswers = contest.standing.filter(st => st.user.toString() === userId).length;
-                        if (userAnswers >= totalQuestions) {
-                            completedParticipants.add(userId);
-                        }
-                    }
-                });
-
-                // If all participants completed, mark contest as not live
-                if (completedParticipants.size >= totalParticipants && contest.isLive) {
-                    contest.isLive = false;
-                    contest.status = "end";
-                    await contest.save();
-                    io.to(contestId).emit('contestEnded', { message: 'All participants completed' });
-                }
-            } catch (error) {
-                console.error('Error in submitAnswer:', error);
-                callback({ success: false, message: 'Error submitting answer' });
-            }
-        });
-
-        socket.on('disconnect', () => {
-            // Socket.IO handles room cleanup automatically
-        });
+        // Start timer to end contest after duration
+        setTimeout(async () => {
+          contest.isLive = false;
+          contest.status = "live";
+          await contest.save();
+          io.to(contestId).emit("contestEnded", {
+            message: "Contest duration ended",
+          });
+        }, contest.duration * 60 * 1000); // duration in minutes
+      } catch (error) {
+        console.error("Error in startContest:", error);
+        callback({ success: false, message: "Error starting contest" });
+      }
     });
+
+    socket.on(
+      "submitAnswer",
+      async ({ contestId, questionId, answer }, callback) => {
+        try {
+          // Use optimized in-memory cache for fast validation
+          const contestEntry = await getContestEntry(contestId);
+          if (!contestEntry) {
+            return callback({ success: false, message: "Contest not found" });
+          }
+
+          // Check if user is enrolled
+          const userId = String(socket.user._id);
+          const isEnrolled =
+            contestEntry.adminId === userId || contestEntry.userIds.has(userId);
+          if (!isEnrolled) {
+            return callback({
+              success: false,
+              message: "User not enrolled in contest",
+            });
+          }
+
+          // Get correct answer from cache (O(1) lookup) - now an array
+          const correctAnswerArray = contestEntry.answerKey.get(
+            String(questionId)
+          );
+          if (!correctAnswerArray) {
+            return callback({ success: false, message: "Question not found" });
+          }
+
+          // Validate answer - support both single answer and array of answers
+          const userAnswerArray = normalizeAnswerArray(answer);
+          const isCorrect =
+            JSON.stringify(userAnswerArray) ===
+            JSON.stringify(correctAnswerArray);
+          const score = isCorrect ? 1 : 0;
+
+          // Now update the DB for standings (only one DB write)
+          const contest = await Contest.findById(contestId);
+          if (!contest || !contest.isLive) {
+            return callback({ success: false, message: "Contest not live" });
+          }
+
+          // Update or create result in standing
+          let result = contest.standing.find(
+            (s) =>
+              s.user.toString() === socket.user._id &&
+              s.question.toString() === questionId
+          );
+          if (!result) {
+            result = {
+              user: socket.user._id,
+              question: questionId,
+              result: score,
+              answer: answer,
+            };
+            contest.standing.push(result);
+          } else {
+            result.result = score; // Allow resubmission
+            result.answer = answer; // Store the user's answer
+          }
+          await contest.save();
+
+          // Send immediate feedback to user
+          callback({
+            success: true,
+            isCorrect,
+            message: isCorrect ? "Correct!" : "Wrong!",
+          });
+
+          // Compute and broadcast new standings to room
+          const standings = await computeStandings(contestId);
+          io.to(contestId).emit("updateStandings", standings);
+
+          // Check if all participants have completed all questions
+          const totalQuestions = contest.questions.length;
+          const totalParticipants = contest.users.length;
+          const completedParticipants = new Set();
+
+          contest.standing.forEach((s) => {
+            const userId = s.user.toString();
+            if (!completedParticipants.has(userId)) {
+              const userAnswers = contest.standing.filter(
+                (st) => st.user.toString() === userId
+              ).length;
+              if (userAnswers >= totalQuestions) {
+                completedParticipants.add(userId);
+              }
+            }
+          });
+
+          // If all participants completed, mark contest as not live
+          if (
+            completedParticipants.size >= totalParticipants &&
+            contest.isLive
+          ) {
+            contest.isLive = false;
+            contest.status = "end";
+            await contest.save();
+            io.to(contestId).emit("contestEnded", {
+              message: "All participants completed",
+            });
+          }
+        } catch (error) {
+          console.error("Error in submitAnswer:", error);
+          callback({ success: false, message: "Error submitting answer" });
+        }
+      }
+    );
+
+    socket.on("disconnect", () => {
+      // Socket.IO handles room cleanup automatically
+    });
+  });
 };
 
 // Helper to compute standings
 async function computeStandings(contestId) {
   const contest = await Contest.findById(contestId)
-    .populate('users', 'name profilePicture')
-    .select('standing startTime');
+    .populate("users", "name profilePicture")
+    .select("standing startTime");
 
   const scores = {};
-  contest.standing.forEach(s => {
+  contest.standing.forEach((s) => {
     const userId = s.user.toString();
     if (!scores[userId]) scores[userId] = 0;
     scores[userId] += s.result;
@@ -409,26 +462,28 @@ async function computeStandings(contestId) {
   const startTime = contest.startTime || 0;
 
   const standings = Object.entries(scores).map(([userId, score]) => {
-    const userEntries = contest.standing.filter(s => s.user.toString() === userId);
+    const userEntries = contest.standing.filter(
+      (s) => s.user.toString() === userId
+    );
     let timeTaken = 999999999;
     if (userEntries.length > 0) {
       const timestamps = userEntries
-        .map(e => e.timestamp ? new Date(e.timestamp).getTime() : 0)
-        .filter(t => t > 0);
+        .map((e) => (e.timestamp ? new Date(e.timestamp).getTime() : 0))
+        .filter((t) => t > 0);
       if (timestamps.length > 0) {
         const maxTimestamp = Math.max(...timestamps);
-        timeTaken = maxTimestamp - startTime;  // Now defined!
+        timeTaken = maxTimestamp - startTime; // Now defined!
         if (timeTaken < 0) timeTaken = 0;
       }
     }
 
-    const user = contest.users.find(u => u._id.toString() === userId);
-    return { 
-      userId, 
-      name: user?.name || 'Unknown', 
+    const user = contest.users.find((u) => u._id.toString() === userId);
+    return {
+      userId,
+      name: user?.name || "Unknown",
       score,
       timeTaken,
-      attempted: userEntries.length  // Include for frontend
+      attempted: userEntries.length, // Include for frontend
     };
   });
 
