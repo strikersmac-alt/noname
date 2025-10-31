@@ -155,6 +155,14 @@ const userSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// Add indexes for better query performance
+userSchema.index({ email: 1 }); // Already unique, but explicit index
+userSchema.index({ contests: 1 }); // For profile queries filtering by contests
+
+// Add compound indexes before model creation
+dailyUserAnalyticsSchema.index({ user: 1, date: 1 }, { unique: true });
+nptelPracticeAnalyticsSchema.index({ subject: 1, date: 1 }, { unique: true });
+
 const User = mongoose.model("User", userSchema);
 const UserAnalytics = mongoose.model("UserAnalytics", userAnalyticsSchema);
 const ContestAnalytics = mongoose.model("ContestAnalytics", contestAnalyticsSchema);
@@ -162,10 +170,6 @@ const DailyActiveUsers = mongoose.model("DailyActiveUsers", DailyActiveUserSchem
 
 const DailyUserAnalytics = mongoose.model("DailyUserAnalytics", dailyUserAnalyticsSchema);
 const NptelPracticeAnalytics = mongoose.model("NptelPracticeAnalytics", nptelPracticeAnalyticsSchema);
-
-dailyUserAnalyticsSchema.index({ user: 1, date: 1 }, { unique: true });
-nptelPracticeAnalyticsSchema.index({ subject: 1, date: 1 }, { unique: true });
-
 
 export default User;
 export { UserAnalytics, ContestAnalytics, DailyUserAnalytics, NptelPracticeAnalytics, DailyActiveUsers};

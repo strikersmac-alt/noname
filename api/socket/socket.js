@@ -186,14 +186,15 @@ const initSockets = (io) => {
       try {
         await session.withTransaction(async () => {
           // First check if contest exists and get basic info
-          const contest = await Contest.findById(contestId).session(session);
+          const contest = await Contest.findById(contestId).session(session).lean();
           if (!contest || contest.status === "end") {
             return callback({ success: false, message: "Contest not found" });
           }
 
           const currentUserId = socket.user._id;
+          // With lean(), users is an array of ObjectIds, not objects
           const isUserInContest = contest.users.some(
-            (u) => u._id.toString() === currentUserId
+            (u) => u.toString() === currentUserId
           );
 
           // Check if contest is already running
@@ -267,7 +268,8 @@ const initSockets = (io) => {
           // Send participant list update for waiting room
           const updatedContestData = await Contest.findById(contestId)
             .populate("users", "name profilePicture") // Removed email
-            .session(session);
+            .session(session)
+            .lean();
 
           io.to(contestId).emit(
             "updateParticipants",
@@ -288,7 +290,7 @@ const initSockets = (io) => {
 
     socket.on("startContest", async (contestId, callback) => {
       try {
-        const contest = await Contest.findById(contestId);
+        const contest = await Contest.findById(contestId).lean();
         if (!contest) {
           return callback({ success: false, message: "Contest not found" });
         }
@@ -303,10 +305,13 @@ const initSockets = (io) => {
         }
 
         const startTime = Date.now();
-        contest.isLive = true;
-        contest.status = "live";
-        contest.startTime = startTime;
-        await contest.save();
+        
+        // Use findByIdAndUpdate since we're using lean() queries
+        await Contest.findByIdAndUpdate(contestId, {
+          isLive: true,
+          status: "live",
+          startTime: startTime
+        });
 
         io.to(contestId).emit("contestStarted", {
           startTime: startTime,
@@ -317,9 +322,10 @@ const initSockets = (io) => {
 
         // Start timer to end contest after duration
         setTimeout(async () => {
-          contest.isLive = false;
-          contest.status = "live";
-          await contest.save();
+          await Contest.findByIdAndUpdate(contestId, {
+            isLive: false,
+            status: "end"
+          });
           io.to(contestId).emit("contestEnded", {
             message: "Contest duration ended",
           });
@@ -367,7 +373,7 @@ const initSockets = (io) => {
           const score = isCorrect ? 1 : 0;
 
           // Now update the DB for standings (only one DB write)
-          const contest = await Contest.findById(contestId);
+          const contest = await Contest.findById(contestId); // Don't use lean here - we need to save
           if (!contest || !contest.isLive) {
             return callback({ success: false, message: "Contest not live" });
           }
@@ -449,7 +455,8 @@ const initSockets = (io) => {
 async function computeStandings(contestId) {
   const contest = await Contest.findById(contestId)
     .populate("users", "name profilePicture")
-    .select("standing startTime");
+    .select("standing startTime")
+    .lean();
 
   const scores = {};
   contest.standing.forEach((s) => {
