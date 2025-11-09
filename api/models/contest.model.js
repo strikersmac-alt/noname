@@ -101,8 +101,12 @@ const contestSchema = new mongoose.Schema(
   { timestamps: true } 
 );
 
-// Add index for better query performance when sorting by createdAt
+// Add indexes for better query performance
 contestSchema.index({ createdAt: -1 });
+contestSchema.index({ isLive: 1 }); // For cron job and live contest queries
+contestSchema.index({ isLive: 1, status: 1 }); // Composite for status + isLive queries
+contestSchema.index({ code: 1 }); // For contest code lookups
+contestSchema.index({ isLive: 1, startTime: 1 }); // For cron expiry calculations
 
 const Contest = mongoose.model("Contest", contestSchema);
 export default Contest;
