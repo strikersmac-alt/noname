@@ -1,5 +1,5 @@
-import User from '../models/user.model.js';
-import Contest from '../models/contest.model.js';
+import User from "../models/user.model.js";
+import Contest from "../models/contest.model.js";
 
 export const getUserProfile = async (req, res) => {
   try {
@@ -15,11 +15,14 @@ export const getUserProfile = async (req, res) => {
     const skip = (validatedPage - 1) * validatedLimit;
 
     // Fetch user basic info
-    const user = await User.findById(userId)
-      .select('name email profilePicture contests createdAt');
+    const user = await User.findById(userId).select(
+      "name email profilePicture contests createdAt"
+    );
 
     if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found' });
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
     }
 
     // Get total contest count
@@ -29,44 +32,58 @@ export const getUserProfile = async (req, res) => {
     const reversedContests = [...user.contests].reverse();
 
     // Get paginated contest IDs
-    const paginatedContestIds = reversedContests.slice(skip, skip + validatedLimit);
+    const paginatedContestIds = reversedContests.slice(
+      skip,
+      skip + validatedLimit
+    );
 
     // Fetch paginated contests with full data
     const contests = await Contest.find({
-      _id: { $in: paginatedContestIds }
+      _id: { $in: paginatedContestIds },
     })
-      .select('code mode isLive duration startTime createdAt standing questions')
+      .select(
+        "code mode isLive duration startTime createdAt standing questions"
+      )
       .lean();
 
     contests.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
     const allContestsForInsights = await Contest.find({
-      _id: { $in: user.contests }
+      _id: { $in: user.contests },
     })
-      .select('mode standing questions createdAt')
+      .select("mode standing questions createdAt")
       .lean();
 
     // Calculate insights from all contest history
     const insights = calculateUserInsights(allContestsForInsights, userId);
 
     // Format paginated contest history
-    const contestHistory = contests.map(contest => {
+    const contestHistory = contests.map((contest) => {
       const userResults = contest.standing.filter(
-        s => s.user.toString() === userId
+        (s) => s.user.toString() === userId
       );
       const userScore = userResults.reduce((sum, r) => sum + r.result, 0);
       const totalQuestions = contest.questions.length;
 
       // Calculate rank
       const scores = {};
-      contest.standing.forEach(s => {
+      contest.standing.forEach((s) => {
         const uid = s.user.toString();
         scores[uid] = (scores[uid] || 0) + s.result;
       });
       const sortedScores = Object.entries(scores)
         .map(([uid, score]) => ({ uid, score }))
         .sort((a, b) => b.score - a.score);
-      const rank = sortedScores.findIndex(s => s.uid === userId) + 1;
+      const rank = sortedScores.findIndex((s) => s.uid === userId) + 1;
+
+      // Derive unique non-empty topics from questions
+      const topics = Array.from(
+        new Set(
+          (contest.questions || [])
+            .map((q) => q.topic)
+            .filter((t) => typeof t === "string" && t.trim().length > 0)
+        )
+      );
 
       return {
         contestId: contest._id,
@@ -76,10 +93,12 @@ export const getUserProfile = async (req, res) => {
         duration: contest.duration,
         startTime: contest.startTime,
         createdAt: contest.createdAt,
+        topic: topics[0] || null,
+        topics,
         userScore,
         totalQuestions,
         rank,
-        totalParticipants: sortedScores.length
+        totalParticipants: sortedScores.length,
       };
     });
     return res.status(200).json({
@@ -88,7 +107,7 @@ export const getUserProfile = async (req, res) => {
         name: user.name,
         email: user.email,
         profilePicture: user.profilePicture,
-        memberSince: user.createdAt
+        memberSince: user.createdAt,
       },
       contestHistory,
       insights,
@@ -97,18 +116,17 @@ export const getUserProfile = async (req, res) => {
         totalPages: totalPages || 1,
         totalContests,
         hasNextPage: validatedPage < totalPages,
-        hasPrevPage: validatedPage > 1
-      }
+        hasPrevPage: validatedPage > 1,
+      },
     });
   } catch (error) {
-    console.error('Error fetching user profile:', error);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    console.error("Error fetching user profile:", error);
+    return res.status(500).json({ success: false, message: "Server error" });
   }
 };
 
 // Helper function to calculate user insights
 function calculateUserInsights(contests, userId) {
-  
   if (contests.length === 0) {
     return {
       totalContests: 0,
@@ -118,7 +136,7 @@ function calculateUserInsights(contests, userId) {
       accuracyRate: 0,
       bestRank: null,
       contestsByMode: { duel: 0, practice: 0, multiplayer: 0 },
-      recentActivity: []
+      recentActivity: [],
     };
   }
 
@@ -128,13 +146,13 @@ function calculateUserInsights(contests, userId) {
   const contestsByMode = { duel: 0, practice: 0, multiplayer: 0 };
   const recentActivity = [];
 
-  contests.forEach(contest => {
+  contests.forEach((contest) => {
     // Count contests by mode
     contestsByMode[contest.mode] = (contestsByMode[contest.mode] || 0) + 1;
 
     // Calculate user's performance in this contest
     const userResults = contest.standing.filter(
-      s => s.user.toString() === userId
+      (s) => s.user.toString() === userId
     );
     const userScore = userResults.reduce((sum, r) => sum + r.result, 0);
     totalQuestionsAttempted += userResults.length;
@@ -142,7 +160,7 @@ function calculateUserInsights(contests, userId) {
 
     // Calculate rank
     const scores = {};
-    contest.standing.forEach(s => {
+    contest.standing.forEach((s) => {
       const uid = s.user.toString();
       if (!scores[uid]) scores[uid] = 0;
       scores[uid] += s.result;
@@ -150,8 +168,8 @@ function calculateUserInsights(contests, userId) {
     const sortedScores = Object.entries(scores)
       .map(([uid, score]) => ({ uid, score }))
       .sort((a, b) => b.score - a.score);
-    const rank = sortedScores.findIndex(s => s.uid === userId) + 1;
-    
+    const rank = sortedScores.findIndex((s) => s.uid === userId) + 1;
+
     if (rank > 0 && rank < bestRank) {
       bestRank = rank;
     }
@@ -164,18 +182,20 @@ function calculateUserInsights(contests, userId) {
         score: userScore,
         totalQuestions: contest.questions.length,
         rank,
-        date: contest.startTime || contest.createdAt
+        date: contest.startTime || contest.createdAt,
       });
     }
   });
 
-  const averageScore = totalQuestionsAttempted > 0 
-    ? (totalCorrectAnswers / totalQuestionsAttempted) * 100 
-    : 0;
-  
-  const accuracyRate = totalQuestionsAttempted > 0
-    ? (totalCorrectAnswers / totalQuestionsAttempted) * 100
-    : 0;
+  const averageScore =
+    totalQuestionsAttempted > 0
+      ? (totalCorrectAnswers / totalQuestionsAttempted) * 100
+      : 0;
+
+  const accuracyRate =
+    totalQuestionsAttempted > 0
+      ? (totalCorrectAnswers / totalQuestionsAttempted) * 100
+      : 0;
 
   return {
     totalContests: contests.length,
@@ -185,6 +205,6 @@ function calculateUserInsights(contests, userId) {
     accuracyRate: Math.round(accuracyRate * 100) / 100,
     bestRank: bestRank === Infinity ? null : bestRank,
     contestsByMode,
-    recentActivity
+    recentActivity,
   };
 }
