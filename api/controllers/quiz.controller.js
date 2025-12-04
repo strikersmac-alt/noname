@@ -386,16 +386,19 @@ export const createContestController = async (req, res) => {
         await User.findByIdAndUpdate(adminId, { $push: { contests: newContest._id } });
         
         // delete
-        
-        const filePath = req.file.path; // Replace with the actual file path
+        if(req.file && req.file.path){
+            const filePath = req.file.path; // Replace with the actual file path
 
-        fs.unlink(filePath, (err) => {
-        if (err) {
-            console.error('Error deleting file:', err);
-            return;
+            fs.unlink(filePath, (err) => {
+            if (err) {
+                console.error('Error deleting file:', err);
+                return;
+            }
+            console.log('File deleted successfully!');
+            });
+
         }
-        console.log('File deleted successfully!');
-        });
+        
 
         return res.status(201).json({
             success: true,
