@@ -51,15 +51,8 @@ export const getUserProfile = async (req, res) => {
     // Limit insights to recent 100 contests to prevent performance issues
     // For users with hundreds of contests, calculating all insights is too slow
     const recentContestIds = reversedContests.slice(0, 100);
-    // Limit insights to recent 100 contests to prevent performance issues
-    // For users with hundreds of contests, calculating all insights is too slow
-    const recentContestIds = reversedContests.slice(0, 100);
+
     const allContestsForInsights = await Contest.find({
-// <<<<<<< HEAD
-//       _id: { $in: user.contests },
-// =======
-      _id: { $in: recentContestIds }
-// >>>>>>> 3259f2559c93fa83b5aab7de081e95fa21380a96
       _id: { $in: recentContestIds }
     })
       .select("mode standing questions createdAt")

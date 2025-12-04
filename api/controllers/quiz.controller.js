@@ -4,6 +4,7 @@ import User from '../models/user.model.js'
 import Nptel from '../models/nptel.model.js'
 import Question from '../models/question.model.js'
 import mongoose from 'mongoose';
+import fs from 'fs';
 
 const generateUniqueCode = async () => {
     let code;
@@ -59,7 +60,7 @@ const calculateTopicSimilarity = (keywords1, keywords2) => {
 };
 
 
-const generateQuestions = async (topic, difficulty, numQuestions, previousQuestions = null) => {
+const generateQuestions = async (topic, difficulty, numQuestions, previousQuestions = null , pdf = null) => {
     // const apiKey = process.env.GEMINI_API_KEY;
     const apiKeys = getGeminiApiKeys();
     // if (!apiKey) {
@@ -89,6 +90,7 @@ const generateQuestions = async (topic, difficulty, numQuestions, previousQuesti
         For each question, provide multiple-choice options and indicate the correct answer.
         Make Sure the quiz is well balanced with the difficulties and possibly google search for the details around the topic . 
         You are essentially based in India so try to make questions relevant to Indian context wherever possible. This is not a must but a preference.
+        If You are provided a pdf document, make sure to use that document as reference to create questions.
         
         QUESTION FORMATTING RULES:
         - Each question statement should be CLEAR, CONCISE and DIRECT
@@ -122,14 +124,35 @@ const generateQuestions = async (topic, difficulty, numQuestions, previousQuesti
     for (const apiKey of apiKeys) {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
         try {
+          
+            const contents = [
+            {
+                role: "user",
+                parts: [{ text: prompt }],
+            },
+            ];
+
+            if (pdf && pdf.path) {
+            const fileBytes = fs.readFileSync(pdf.path);
+            const base64Data = fileBytes.toString("base64");
+
+            contents.push({
+                role: "user",
+                parts: [
+                {
+                    inlineData: {
+                    mimeType: "application/pdf",
+                    data: base64Data,
+                    },
+                },
+                ],
+            });
+            }
+            // console.log(base64Data);
             const response = await axios.post(
                 url,
                 {
-                    contents: [
-                        {
-                            parts: [{ text: prompt }],
-                        },
-                    ],
+                    contents: contents
                 },
                 {
                     headers: {
@@ -144,7 +167,7 @@ const generateQuestions = async (topic, difficulty, numQuestions, previousQuesti
 
             const jsonContent = rawContent
                 .replace(/^```json\s*/, "")
-                .replace(/\s*```$/, "");
+                .replace(/\s*```$/, "");    
 
             const questions = JSON.parse(jsonContent);
             return questions;
@@ -260,7 +283,7 @@ const fetchPreviousQuestions = async (topic, limit = 50) => {
     }
 };
 
-const createQuiz = async (topic, difficulty, numQuestions, previousQuestions = null) => {
+const createQuiz = async (topic, difficulty, numQuestions, previousQuestions = null , pdf = null) => {
     if (!topic || !difficulty || !numQuestions) {
         return res.status(400).json({
             success: false,
@@ -269,7 +292,7 @@ const createQuiz = async (topic, difficulty, numQuestions, previousQuestions = n
     }
 
     try {
-        const questions = await generateQuestions(topic, difficulty, parseInt(numQuestions, 10), previousQuestions);
+        const questions = await generateQuestions(topic, difficulty, parseInt(numQuestions, 10), previousQuestions, pdf);
         if (!questions || questions.length === 0) {
             return res.status(500).json({ success: false, message: 'The AI failed to generate questions for the given topic. Please try another topic.' });
         }
@@ -280,9 +303,9 @@ const createQuiz = async (topic, difficulty, numQuestions, previousQuestions = n
     }
 };
 
-const createContest = async (topic, difficulty, numQuestions, contestDetails, previousQuestions = null) => {
+const createContest = async (topic, difficulty, numQuestions, contestDetails, previousQuestions = null , pdf = null) => {
     try {
-        const questions = await createQuiz(topic, difficulty, numQuestions, previousQuestions);
+        const questions = await createQuiz(topic, difficulty, numQuestions, previousQuestions , pdf);
         
         // Save questions to Question collection for future reference
         const keywords = extractKeywords(topic);
@@ -328,7 +351,10 @@ const createContest = async (topic, difficulty, numQuestions, contestDetails, pr
 };
 
 export const createContestController = async (req, res) => {
-    const { topic, difficulty, numQuestions, mode, duration, startTime, timeZone } = req.body;
+    console.log("Reached controller");
+    
+    const { topic, difficulty, numQuestions, mode, duration, startTime, timeZone} = req.body;
+    
     const adminId = req.user?.userId || req.user?._id;
 
     if (!topic || !difficulty || !numQuestions || !adminId) {
@@ -356,8 +382,21 @@ export const createContestController = async (req, res) => {
             capacity: mode === "duel" ? 2 : 8,
         };
 
-        const newContest = await createContest(topic, difficulty, numQuestions, contestDetails, previousQuestions);
+        const newContest = await createContest(topic, difficulty, numQuestions, contestDetails, previousQuestions , req.file);
         await User.findByIdAndUpdate(adminId, { $push: { contests: newContest._id } });
+        
+        // delete
+        
+        const filePath = req.file.path; // Replace with the actual file path
+
+        fs.unlink(filePath, (err) => {
+        if (err) {
+            console.error('Error deleting file:', err);
+            return;
+        }
+        console.log('File deleted successfully!');
+        });
+
         return res.status(201).json({
             success: true,
             message: "Contest created successfully.",
