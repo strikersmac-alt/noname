@@ -122,7 +122,7 @@ const generateQuestions = async (topic, difficulty, numQuestions, previousQuesti
         Do not include any text or markdown formatting outside of the JSON array itself.${contextSection}
     `;
     for (const apiKey of apiKeys) {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
         try {
           
             const contents = [
